@@ -5,7 +5,11 @@
 ## 当前技术选择
 
 - Flutter
+- go_router
 - flutter_riverpod
+- logging
+- intl
+- timezone
 - drift
 - SQLite
 - WebDAV

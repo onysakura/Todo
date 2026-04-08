@@ -18,6 +18,9 @@
 ## 当前项目基线
 
 - 客户端技术栈：Flutter
+- 路由方案：go_router
+- 日志方案：logging
+- 时间处理基础库：intl + timezone
 - 本地存储：SQLite
 - 同步方式：WebDAV
 - 目标平台：Windows、Android
@@ -35,7 +38,13 @@
 - 当前 `flutter` / `dart` 尚未加入全局 PATH；执行 Flutter 命令时优先使用 Flutter 完整路径。
 - 某些 Flutter 命令会写入 Scoop 下的 Flutter SDK 缓存目录，必要时需要提权执行。
 - 在当前环境下，`flutter` / `dart` / `build_runner` 等命令默认应优先按提权方式执行，否则容易因 SDK 缓存写入受限而表现为卡住或超时。
+- 由于当前网络环境对 GitHub 二进制下载不稳定，`sqlite3` 优先使用系统 SQLite 库而不是构建时下载预编译二进制。
+- 当前 Windows 构建已通过。
+- 当前 Android `app-debug.apk` 已生成。
+- 当前 Android 构建链仍存在 Maven TLS 握手风险，后续遇到 `repo.maven.apache.org` 相关握手失败时，应优先按网络/TLS 问题处理，而不是误判为业务代码问题。
 - 若 Flutter 命令异常中断，需要优先检查并清理 `R:\Files\Scoop\Scoop\apps\flutter\current\bin\cache\flutter.bat.lock`。
+- 当前本地正常校验流程 `dart run build_runner build -> dart format -> flutter analyze -> flutter test` 已可在提权后直接跑通。
+- 就当前项目本地校验而言，翻墙不是默认前置条件；若再次出现“像卡住”的现象，优先检查是否未提权、是否存在 `flutter.bat.lock`，再判断是否为网络问题。
 
 ## 当前业务语义
 

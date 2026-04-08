@@ -20,8 +20,11 @@
 ### 3.1 技术路线
 
 - 客户端框架：Flutter
+- 路由：go_router
 - 本地存储：SQLite
 - 状态管理：flutter_riverpod
+- 日志：logging
+- 时间处理基础库：intl + timezone
 - 数据库访问层：drift
 - SQLite 运行时支持：sqlite3_flutter_libs
 - 核心业务逻辑：纯 Dart 模块
@@ -69,7 +72,11 @@
 - Dart 包名使用 `todo_app`
 - 当前阶段先建立应用壳与目录骨架，再进入数据层实现
 - 项目状态管理统一基于 Riverpod
+- 项目页面路由统一基于 go_router
+- 项目日志基础设施统一基于 logging
+- 项目时间处理基础设施统一基于 intl + timezone
 - 项目本地数据库统一基于 Drift + SQLite
+- 当前构建环境下，`sqlite3` 优先使用系统 SQLite 库以规避构建阶段的网络下载风险
 
 ## 4. 核心数据模型
 

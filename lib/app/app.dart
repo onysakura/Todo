@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'shell/app_shell.dart';
+import '../core/routing/app_router.dart';
 import 'theme/app_theme.dart';
 
-class TodoApp extends StatelessWidget {
+class TodoApp extends ConsumerWidget {
   const TodoApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(appRouterProvider);
+
+    return MaterialApp.router(
       title: 'Todo',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
-      home: const AppShell(),
+      routerConfig: router,
     );
   }
 }

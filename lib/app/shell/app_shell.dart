@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
-import '../../features/calendar/presentation/calendar_page.dart';
-import '../../features/settings/presentation/settings_page.dart';
-import '../../features/upcoming/presentation/upcoming_page.dart';
-import 'app_shell_controller.dart';
+import '../../core/routing/app_router.dart';
 
-class AppShell extends ConsumerWidget {
-  const AppShell({super.key});
+class AppShell extends StatelessWidget {
+  const AppShell({required this.location, required this.child, super.key});
 
-  static const _pages = <Widget>[
-    CalendarPage(),
-    UpcomingPage(),
-    SettingsPage(),
+  final String location;
+  final Widget child;
+
+  static const _paths = <String>[
+    AppRoutePath.calendar,
+    AppRoutePath.upcoming,
+    AppRoutePath.settings,
   ];
 
   static const _destinations = <NavigationDestination>[
@@ -34,18 +34,28 @@ class AppShell extends ConsumerWidget {
   ];
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final currentIndex = ref.watch(appShellIndexProvider);
+  Widget build(BuildContext context) {
+    final currentIndex = _resolveIndex(location);
 
     return Scaffold(
-      body: SafeArea(child: _pages[currentIndex]),
+      body: SafeArea(child: child),
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentIndex,
         destinations: _destinations,
         onDestinationSelected: (index) {
-          ref.read(appShellIndexProvider.notifier).setIndex(index);
+          context.go(_paths[index]);
         },
       ),
     );
+  }
+
+  int _resolveIndex(String location) {
+    for (var index = 0; index < _paths.length; index++) {
+      if (location.startsWith(_paths[index])) {
+        return index;
+      }
+    }
+
+    return 0;
   }
 }

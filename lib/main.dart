@@ -1,9 +1,8 @@
-import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app.dart';
+import 'bootstrap.dart';
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ProviderScope(child: TodoApp()));
+Future<void> main() async {
+  await bootstrap(() => const ProviderScope(child: TodoApp()));
 }
