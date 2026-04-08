@@ -19,7 +19,8 @@ class PlaceholderPanel extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+      // 当前占位页仅用于验证信息层级和导航壳，不作为正式页面留白密度基线。
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -34,19 +35,19 @@ class PlaceholderPanel extends StatelessWidget {
           Text(title, style: theme.textTheme.headlineMedium),
           const SizedBox(height: 12),
           Text(description, style: theme.textTheme.bodyLarge),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           Expanded(
             child: Card(
               child: Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('当前占位内容', style: theme.textTheme.titleLarge),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     for (final item in items)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.only(bottom: 10),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -55,7 +56,7 @@ class PlaceholderPanel extends StatelessWidget {
                               size: 20,
                               color: theme.colorScheme.primary,
                             ),
-                            const SizedBox(width: 10),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 item,

@@ -14,6 +14,8 @@
 - 每次完成阶段性工作后，应同步更新实施计划中的状态，保证能直接从文档判断当前进度。
 - 在执行过程中遇到新的稳定信息、环境约束、实现前提或风险时，必须及时补充到相关文档中，避免会话压缩后信息丢失。
 - 若信息属于长期协作约束、环境基线或执行习惯，应同步补充到 `AGENTS.md`。
+- 每次涉及 UI 改动且需要用户验证效果时，除 `analyze` / `test` 外，还必须至少执行一次实际构建；桌面相关改动优先构建 Windows，移动端相关改动优先构建 Android，跨端导航或布局改动默认两端都构建。
+- 当前占位页仅用于验证导航壳、信息层级和基本布局，不代表正式页面默认留白、卡片密度或最终视觉样式；后续功能页面实现时不得直接把占位页 spacing 当作设计基线。
 
 ## 当前项目基线
 
@@ -41,7 +43,9 @@
 - 由于当前网络环境对 GitHub 二进制下载不稳定，`sqlite3` 优先使用系统 SQLite 库而不是构建时下载预编译二进制。
 - 当前 Windows 构建已通过。
 - 当前 Android `app-debug.apk` 已生成。
-- 当前 Android 构建链仍存在 Maven TLS 握手风险，后续遇到 `repo.maven.apache.org` 相关握手失败时，应优先按网络/TLS 问题处理，而不是误判为业务代码问题。
+- 截至 2026-04-08，`flutter doctor -v` 中的 Android toolchain、网络资源、许可证检查均已通过。
+- 截至 2026-04-08，Windows 构建与 Android Debug 构建均可直接执行通过。
+- 当前 `flutter doctor` 剩余告警仅为 `flutter` / `dart` 未加入全局 PATH，这不影响项目构建与校验。
 - 若 Flutter 命令异常中断，需要优先检查并清理 `R:\Files\Scoop\Scoop\apps\flutter\current\bin\cache\flutter.bat.lock`。
 - 当前本地正常校验流程 `dart run build_runner build -> dart format -> flutter analyze -> flutter test` 已可在提权后直接跑通。
 - 就当前项目本地校验而言，翻墙不是默认前置条件；若再次出现“像卡住”的现象，优先检查是否未提权、是否存在 `flutter.bat.lock`，再判断是否为网络问题。
