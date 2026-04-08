@@ -21,6 +21,9 @@
 
 - 客户端框架：Flutter
 - 本地存储：SQLite
+- 状态管理：flutter_riverpod
+- 数据库访问层：drift
+- SQLite 运行时支持：sqlite3_flutter_libs
 - 核心业务逻辑：纯 Dart 模块
 - 同步方式：WebDAV
 - 目标平台：Windows、Android
@@ -60,6 +63,13 @@
   本地提醒与后台任务协同。
 - `settings_service`
   同步配置、显示偏好、后台选项等。
+
+### 3.4 当前已确定的工程约定
+
+- Dart 包名使用 `todo_app`
+- 当前阶段先建立应用壳与目录骨架，再进入数据层实现
+- 项目状态管理统一基于 Riverpod
+- 项目本地数据库统一基于 Drift + SQLite
 
 ## 4. 核心数据模型
 

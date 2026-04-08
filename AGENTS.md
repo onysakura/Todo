@@ -12,6 +12,8 @@
 - 若需求或规则发生变化，应优先更新文档，再调整实现。
 - 实施计划文档必须带有明确状态标识，至少区分：未开始、进行中、已完成、阻塞。
 - 每次完成阶段性工作后，应同步更新实施计划中的状态，保证能直接从文档判断当前进度。
+- 在执行过程中遇到新的稳定信息、环境约束、实现前提或风险时，必须及时补充到相关文档中，避免会话压缩后信息丢失。
+- 若信息属于长期协作约束、环境基线或执行习惯，应同步补充到 `AGENTS.md`。
 
 ## 当前项目基线
 
@@ -19,6 +21,21 @@
 - 本地存储：SQLite
 - 同步方式：WebDAV
 - 目标平台：Windows、Android
+
+## 当前环境基线
+
+- Flutter 通过 Scoop 安装。
+- Flutter SDK 当前路径：`R:\Files\Scoop\Scoop\apps\flutter\current\bin\flutter.bat`
+- Android SDK 当前路径：`R:\Files\Android\Sdk`
+- 系统默认 Java 保持为 Java 25，不做全局替换。
+- 当前项目的 Android 构建单独固定到 JDK 21。
+- 项目专用 JDK 21 路径：`R:\Files\Scoop\Scoop\apps\temurin21-jdk\current`
+- `android/gradle.properties` 已设置 `org.gradle.java.home` 指向 JDK 21。
+- 当前 Android toolchain 已通过 `flutter doctor` 检查。
+- 当前 `flutter` / `dart` 尚未加入全局 PATH；执行 Flutter 命令时优先使用 Flutter 完整路径。
+- 某些 Flutter 命令会写入 Scoop 下的 Flutter SDK 缓存目录，必要时需要提权执行。
+- 在当前环境下，`flutter` / `dart` / `build_runner` 等命令默认应优先按提权方式执行，否则容易因 SDK 缓存写入受限而表现为卡住或超时。
+- 若 Flutter 命令异常中断，需要优先检查并清理 `R:\Files\Scoop\Scoop\apps\flutter\current\bin\cache\flutter.bat.lock`。
 
 ## 当前业务语义
 
