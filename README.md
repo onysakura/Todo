@@ -9,7 +9,7 @@
 - 当前有效需求基线：`docs/01-requirements-spec.md`
 - 详细设计：已完成
 - 实施计划：已完成
-- 编码实现：阶段 1 已完成
+- 编码实现：阶段 2 进行中
 
 ## 当前原则
 
@@ -29,7 +29,11 @@
 - 已完成 `cargo tauri android init --ci --skip-targets-install`
 - 已通过 `cargo tauri android build --debug -t aarch64 --apk -v`
 - 用户已确认 Android 实际安装与基础功能正常
-- 阶段 1 已完成，下一步进入阶段 2 的 Rust 数据层实现
+- 阶段 1 已完成
+- 已完成 `rusqlite` 数据层接入、数据库初始化与迁移机制
+- 已落地 7 张核心表初版、最小仓储层与事务边界
+- 已通过 `cargo check --manifest-path src-tauri\Cargo.toml` 与 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 5 个 Rust 测试通过
+- 当前正在推进阶段 2 的实体 CRUD 与事务边界实现
 
 ## 文档
 

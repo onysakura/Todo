@@ -109,7 +109,17 @@
 
 ### 阶段 2. Rust 核心与本地数据层
 
-当前状态：`未开始`
+当前状态：`进行中`
+
+当前进展：
+
+- 已选定 Rust SQLite 访问方案为 `rusqlite`，并启用 `bundled` 模式。
+- 已建立应用启动数据库初始化与 `schema_migrations` 迁移机制。
+- 已落地核心表初版：`task_series`、`task_series_revision`、`task_occurrence_override`、`tag`、`holiday_calendar`、`sync_meta`、`app_settings`。
+- 已定义首批领域对象：任务模板、版本段、单次覆盖、标签、节假日、同步元数据、应用设置。
+- 已实现 `sync_meta`、`tag`、`task_series`、`task_series_revision`、`task_occurrence_override` 的最小仓储与事务边界。
+- 已实现 `app_get_bootstrap_status`、`tag_list` 命令闭环。
+- 已补基础测试并通过 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 5 个 Rust 测试通过。
 
 目标：
 
@@ -548,9 +558,9 @@
 
 ## 11. 下一步执行建议
 
-建议下一步先执行阶段 1 的剩余动作：
+建议下一步执行阶段 2 的当前动作：
 
-1. 开始阶段 2，确定 Rust 侧 SQLite 访问方案与迁移机制
-2. 建立核心表结构与领域对象初版
-3. 补齐本地数据库初始化、仓储层与基础测试
+1. 补齐 `task_series`、`task_series_revision`、`task_occurrence_override` 的仓储与事务边界
+2. 建立任务基础 DTO 与 command 输入输出模型
+3. 为阶段 3 的新建/编辑任务闭环预留服务层接口
 4. 视发布策略决定是否继续补齐 Android 多 ABI 构建

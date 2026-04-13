@@ -28,6 +28,7 @@
 - 同步策略按“远程优先”理解：同步与保存冲突时以远端为准，本地作为工作副本与离线缓存。
 - 当前产品目标平台为 Windows 与 Android，后续设计与实现必须以双端兼容为前提，允许分阶段交付，但不得按单端产品建模。
 - 当前已确定主线技术架构：`Tauri v2 + Vue 3 + TypeScript + Vite + Rust + SQLite + WebDAV`。
+- Rust 侧 SQLite 访问当前选型为 `rusqlite`，并启用 `bundled` 模式以降低环境依赖复杂度。
 - 前端不直接连接 WebDAV，也不直接访问 SQLite；数据库、同步、后台与平台能力统一收敛在 Rust 侧。
 - 前端整体界面以自定义设计系统为主，复杂日期时间控件例外采用 `Naive UI` 能力，不以大型 UI 库作为整站基座。
 
@@ -46,6 +47,9 @@
 - 截至 2026-04-13，`cargo tauri android build --debug -t aarch64 --apk -v` 已通过，Android 单架构调试 APK 构建链路已验证。
 - 截至 2026-04-13，用户已确认 Android 端实际安装并可正常使用，阶段 1 的 Android 基础启动验证已满足。
 - 当前 Android 全 ABI 构建仍可能因网络抖动触发额外 Rust target 下载或远端依赖拉取超时；基础验证阶段优先使用 `aarch64` 单目标构建。
+- 截至 2026-04-13，阶段 2 已选定 `rusqlite + 显式 schema_migrations` 方案，并已完成数据库初始化、7 张核心表初版、`sync_meta` / `tag` 最小仓储及基础测试。
+- 截至 2026-04-13，阶段 2 已补齐 `task_series`、`task_series_revision`、`task_occurrence_override` 的最小仓储与事务边界。
+- 截至 2026-04-13，`cargo test --manifest-path src-tauri\Cargo.toml` 已通过，当前共 5 个 Rust 测试通过。
 
 ## 当前文档约定
 

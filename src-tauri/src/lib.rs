@@ -1,13 +1,53 @@
+mod db;
+mod domain;
+mod error;
+mod repository;
+
+use db::{BootstrapStatus, Database};
+use domain::Tag;
+use error::{CommandError, CommandResult};
+use tauri::{Manager, State};
+
+struct AppState {
+    database: Database,
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
-  format!("你好，{}。Tauri 主线骨架已就绪。", name)
+    format!("你好，{}。Tauri 主线骨架已就绪。", name)
+}
+
+#[tauri::command]
+fn app_get_bootstrap_status(state: State<'_, AppState>) -> CommandResult<BootstrapStatus> {
+    state
+        .database
+        .bootstrap_status()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn tag_list(state: State<'_, AppState>) -> CommandResult<Vec<Tag>> {
+    state.database.list_tags().map_err(CommandError::from)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
-    .plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())
-    .invoke_handler(tauri::generate_handler![greet])
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
+        .setup(|app| {
+            let database = Database::open_for_app(app.handle())?;
+            app.manage(AppState { database });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            app_get_bootstrap_status,
+            tag_list
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
