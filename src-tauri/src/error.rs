@@ -16,6 +16,8 @@ pub enum AppError {
     State(String),
     #[error("时间格式化失败: {0}")]
     Time(String),
+    #[error("参数校验失败: {0}")]
+    Validation(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -33,6 +35,7 @@ impl From<AppError> for CommandError {
             AppError::Path(_) => "path_error",
             AppError::State(_) => "state_error",
             AppError::Time(_) => "time_error",
+            AppError::Validation(_) => "validation_error",
         };
 
         Self {

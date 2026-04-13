@@ -66,4 +66,28 @@ impl TagRepository {
         }
         Ok(tags)
     }
+
+    pub fn get_by_id(connection: &Connection, id: &str) -> AppResult<Option<Tag>> {
+        let mut statement = connection.prepare(
+            r#"
+        SELECT id, name, color_value, sort_order, created_at, updated_at
+        FROM tag
+        WHERE id = ?1
+      "#,
+        )?;
+
+        let mut rows = statement.query([id])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color_value: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            }));
+        }
+
+        Ok(None)
+    }
 }

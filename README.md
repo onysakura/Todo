@@ -32,8 +32,9 @@
 - 阶段 1 已完成
 - 已完成 `rusqlite` 数据层接入、数据库初始化与迁移机制
 - 已落地 7 张核心表初版、最小仓储层与事务边界
-- 已通过 `cargo check --manifest-path src-tauri\Cargo.toml` 与 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 5 个 Rust 测试通过
-- 当前正在推进阶段 2 的实体 CRUD 与事务边界实现
+- 已完成 `task_create`、`task_get_detail` 的单次任务后端闭环
+- 已通过 `cargo check --manifest-path src-tauri\Cargo.toml` 与 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 8 个 Rust 测试通过
+- 当前正在推进阶段 2 的更新、删除、状态修改与更多查询能力
 
 ## 文档
 

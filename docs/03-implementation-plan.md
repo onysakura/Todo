@@ -118,8 +118,9 @@
 - 已落地核心表初版：`task_series`、`task_series_revision`、`task_occurrence_override`、`tag`、`holiday_calendar`、`sync_meta`、`app_settings`。
 - 已定义首批领域对象：任务模板、版本段、单次覆盖、标签、节假日、同步元数据、应用设置。
 - 已实现 `sync_meta`、`tag`、`task_series`、`task_series_revision`、`task_occurrence_override` 的最小仓储与事务边界。
-- 已实现 `app_get_bootstrap_status`、`tag_list` 命令闭环。
-- 已补基础测试并通过 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 5 个 Rust 测试通过。
+- 已实现 `app_get_bootstrap_status`、`tag_list`、`task_create`、`task_get_detail` 命令闭环。
+- 已完成单次任务创建、详情回查、标签校验与时间字段基础校验。
+- 已补基础测试并通过 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 8 个 Rust 测试通过。
 
 目标：
 
@@ -560,7 +561,7 @@
 
 建议下一步执行阶段 2 的当前动作：
 
-1. 补齐 `task_series`、`task_series_revision`、`task_occurrence_override` 的仓储与事务边界
-2. 建立任务基础 DTO 与 command 输入输出模型
-3. 为阶段 3 的新建/编辑任务闭环预留服务层接口
+1. 继续补齐 `task_update`、`task_delete`、`task_set_status`
+2. 建立任务详情与编辑态更完整的 DTO 映射
+3. 为阶段 3 的前端新建/编辑任务页接入准备更稳定的命令契约
 4. 视发布策略决定是否继续补齐 Android 多 ABI 构建
