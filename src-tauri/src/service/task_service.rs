@@ -83,6 +83,29 @@ pub struct TaskDetailDto {
     pub cancelled_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpcomingQueryInput {
+    pub start_date: Option<String>,
+    pub day_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListItemDto {
+    pub series_id: String,
+    pub title: String,
+    pub note: Option<String>,
+    pub tag_id: Option<String>,
+    pub priority: Option<i64>,
+    pub all_day: bool,
+    pub start_date: Option<String>,
+    pub start_time: Option<String>,
+    pub due_date: String,
+    pub due_time: Option<String>,
+    pub status: String,
+}
+
 #[derive(Debug, Clone)]
 struct ParsedTaskInput {
     title: String,
@@ -188,69 +211,7 @@ impl TaskService {
         database: &Database,
         series_id: &str,
     ) -> AppResult<Option<TaskDetailDto>> {
-        database.with_connection(|connection| {
-            let series = match TaskSeriesRepository::get_by_id(connection, series_id)? {
-                Some(series) => series,
-                None => return Ok(None),
-            };
-
-            let mut revisions =
-                TaskSeriesRevisionRepository::list_by_series_id(connection, series_id)?;
-            let revision = revisions
-                .drain(..)
-                .next()
-                .ok_or_else(|| AppError::State("任务缺少版本段数据".to_string()))?;
-
-            let (start_date, start_time, due_date, due_time, occurrence_key) =
-                reconstruct_task_schedule(&revision)?;
-
-            let occurrence_override =
-                TaskOccurrenceOverrideRepository::get_by_series_and_occurrence(
-                    connection,
-                    series_id,
-                    &occurrence_key,
-                )?;
-
-            let detail = TaskDetailDto {
-                series_id: series.id,
-                revision_id: revision.id,
-                occurrence_key,
-                kind: series.kind,
-                title: occurrence_override
-                    .as_ref()
-                    .and_then(|value| value.override_title.clone())
-                    .unwrap_or(revision.title),
-                note: occurrence_override
-                    .as_ref()
-                    .and_then(|value| value.override_note.clone())
-                    .or(revision.note),
-                tag_id: occurrence_override
-                    .as_ref()
-                    .and_then(|value| value.override_tag_id.clone())
-                    .or(revision.tag_id),
-                priority: occurrence_override
-                    .as_ref()
-                    .and_then(|value| value.override_priority)
-                    .or(revision.priority),
-                all_day: revision.all_day,
-                start_date,
-                start_time,
-                due_date,
-                due_time,
-                status: occurrence_override
-                    .as_ref()
-                    .map(|value| value.status.clone())
-                    .unwrap_or_else(|| STATUS_PENDING.to_string()),
-                completed_at: occurrence_override
-                    .as_ref()
-                    .and_then(|value| value.completed_at.clone()),
-                cancelled_at: occurrence_override
-                    .as_ref()
-                    .and_then(|value| value.cancelled_at.clone()),
-            };
-
-            Ok(Some(detail))
-        })
+        database.with_connection(|connection| Self::load_task_detail(connection, series_id))
     }
 
     pub fn update_task(database: &Database, input: TaskUpdateInput) -> AppResult<TaskDetailDto> {
@@ -427,6 +388,56 @@ impl TaskService {
         })
     }
 
+    pub fn upcoming_query(
+        database: &Database,
+        input: UpcomingQueryInput,
+    ) -> AppResult<Vec<TaskListItemDto>> {
+        let start_date = input
+            .start_date
+            .as_deref()
+            .map(|value| parse_date(value, "查询开始日期"))
+            .transpose()?
+            .unwrap_or_else(today_utc);
+        let day_count = input.day_count.unwrap_or(31);
+        if day_count == 0 {
+            return Err(AppError::Validation("查询天数必须大于 0".to_string()));
+        }
+        let end_date = start_date + Duration::days(day_count as i64 - 1);
+
+        database.with_connection(|connection| {
+            let series_ids = TaskSeriesRepository::list_single_ids(connection)?;
+            let mut items = Vec::new();
+
+            for series_id in series_ids {
+                let Some(detail) = Self::load_task_detail(connection, &series_id)? else {
+                    continue;
+                };
+
+                let due_date = parse_date(&detail.due_date, "任务截止日期")?;
+                if due_date < start_date || due_date > end_date {
+                    continue;
+                }
+
+                items.push(TaskListItemDto {
+                    series_id: detail.series_id,
+                    title: detail.title,
+                    note: detail.note,
+                    tag_id: detail.tag_id,
+                    priority: detail.priority,
+                    all_day: detail.all_day,
+                    start_date: detail.start_date,
+                    start_time: detail.start_time,
+                    due_date: detail.due_date,
+                    due_time: detail.due_time,
+                    status: detail.status,
+                });
+            }
+
+            items.sort_by(|left, right| sort_key(left).cmp(&sort_key(right)));
+            Ok(items)
+        })
+    }
+
     fn validate_input(input: TaskCreateInput) -> AppResult<ParsedTaskInput> {
         let title = input.title.trim().to_string();
         if title.is_empty() {
@@ -552,6 +563,25 @@ impl TaskService {
                 .and_then(|value| value.cancelled_at.clone()),
         })
     }
+
+    fn load_task_detail(
+        connection: &rusqlite::Connection,
+        series_id: &str,
+    ) -> AppResult<Option<TaskDetailDto>> {
+        let series = match TaskSeriesRepository::get_by_id(connection, series_id)? {
+            Some(series) => series,
+            None => return Ok(None),
+        };
+
+        let mut revisions = TaskSeriesRevisionRepository::list_by_series_id(connection, series_id)?;
+        let revision = revisions
+            .drain(..)
+            .next()
+            .ok_or_else(|| AppError::State("任务缺少版本段数据".to_string()))?;
+        let occurrence_key = reconstruct_task_schedule(&revision)?.4;
+
+        Self::build_task_detail(connection, series, revision, occurrence_key).map(Some)
+    }
 }
 
 fn reconstruct_task_schedule(
@@ -662,11 +692,26 @@ fn normalize_status(value: &str) -> AppResult<&str> {
     }
 }
 
+fn today_utc() -> Date {
+    time::OffsetDateTime::now_utc().date()
+}
+
+fn sort_key(task: &TaskListItemDto) -> (String, String, i64, String) {
+    (
+        task.due_date.clone(),
+        task.due_time.clone().unwrap_or_else(|| "00:00".to_string()),
+        task.priority.unwrap_or(999),
+        task.series_id.clone(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
 
-    use super::{TaskCreateInput, TaskService, TaskSetStatusInput, TaskUpdateInput};
+    use super::{
+        TaskCreateInput, TaskService, TaskSetStatusInput, TaskUpdateInput, UpcomingQueryInput,
+    };
     use crate::{db::Database, repository::tag_repository::TagRepository};
 
     #[test]
@@ -878,5 +923,73 @@ mod tests {
         let detail = TaskService::get_task_detail(&database, &created.series_id)
             .expect("should query detail");
         assert!(detail.is_none());
+    }
+
+    #[test]
+    fn upcoming_query_filters_and_sorts_single_tasks() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "第三个".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(3),
+                all_day: false,
+                start_date: Some("2026-04-15".to_string()),
+                start_time: Some("11:00".to_string()),
+                due_date: "2026-04-16".to_string(),
+                due_time: Some("10:00".to_string()),
+            },
+        )
+        .expect("should create task 1");
+
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "第一个".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(1),
+                all_day: false,
+                start_date: Some("2026-04-13".to_string()),
+                start_time: Some("09:00".to_string()),
+                due_date: "2026-04-14".to_string(),
+                due_time: Some("09:30".to_string()),
+            },
+        )
+        .expect("should create task 2");
+
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "范围外".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(2),
+                all_day: true,
+                start_date: Some("2026-05-01".to_string()),
+                start_time: None,
+                due_date: "2026-05-01".to_string(),
+                due_time: None,
+            },
+        )
+        .expect("should create task 3");
+
+        let tasks = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-13".to_string()),
+                day_count: Some(7),
+            },
+        )
+        .expect("should query upcoming");
+
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].title, "第一个");
+        assert_eq!(tasks[1].title, "第三个");
     }
 }

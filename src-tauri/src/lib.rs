@@ -8,7 +8,8 @@ use db::{BootstrapStatus, Database};
 use domain::Tag;
 use error::{CommandError, CommandResult};
 use service::task_service::{
-    TaskCreateInput, TaskDetailDto, TaskService, TaskSetStatusInput, TaskUpdateInput,
+    TaskCreateInput, TaskDetailDto, TaskListItemDto, TaskService, TaskSetStatusInput,
+    TaskUpdateInput, UpcomingQueryInput,
 };
 use tauri::{Manager, State};
 
@@ -65,6 +66,14 @@ fn task_set_status(
     TaskService::set_status(&state.database, input).map_err(CommandError::from)
 }
 
+#[tauri::command]
+fn upcoming_query(
+    state: State<'_, AppState>,
+    input: UpcomingQueryInput,
+) -> CommandResult<Vec<TaskListItemDto>> {
+    TaskService::upcoming_query(&state.database, input).map_err(CommandError::from)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -86,7 +95,8 @@ pub fn run() {
             task_get_detail,
             task_update,
             task_delete,
-            task_set_status
+            task_set_status,
+            upcoming_query
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

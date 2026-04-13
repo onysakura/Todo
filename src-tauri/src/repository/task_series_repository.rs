@@ -66,4 +66,23 @@ impl TaskSeriesRepository {
         connection.execute("DELETE FROM task_series WHERE id = ?1", [id])?;
         Ok(())
     }
+
+    pub fn list_single_ids(connection: &Connection) -> AppResult<Vec<String>> {
+        let mut statement = connection.prepare(
+            r#"
+        SELECT id
+        FROM task_series
+        WHERE kind = 'single'
+          AND archived_at IS NULL
+        ORDER BY created_at ASC
+      "#,
+        )?;
+
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?);
+        }
+        Ok(ids)
+    }
 }
