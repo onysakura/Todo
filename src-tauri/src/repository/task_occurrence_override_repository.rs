@@ -126,4 +126,12 @@ impl TaskOccurrenceOverrideRepository {
 
         Ok(record)
     }
+
+    pub fn delete_by_series_id(connection: &Connection, series_id: &str) -> AppResult<()> {
+        connection.execute(
+            "DELETE FROM task_occurrence_override WHERE series_id = ?1",
+            [series_id],
+        )?;
+        Ok(())
+    }
 }

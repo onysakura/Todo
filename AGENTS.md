@@ -50,7 +50,8 @@
 - 截至 2026-04-13，阶段 2 已选定 `rusqlite + 显式 schema_migrations` 方案，并已完成数据库初始化、7 张核心表初版、`sync_meta` / `tag` 最小仓储及基础测试。
 - 截至 2026-04-13，阶段 2 已补齐 `task_series`、`task_series_revision`、`task_occurrence_override` 的最小仓储与事务边界。
 - 截至 2026-04-13，阶段 2 已完成 `task_create`、`task_get_detail` 的单次任务后端闭环与输入校验。
-- 截至 2026-04-13，`cargo test --manifest-path src-tauri\Cargo.toml` 已通过，当前共 8 个 Rust 测试通过。
+- 截至 2026-04-13，阶段 2 已完成 `task_update`、`task_delete`、`task_set_status` 的单次任务后端闭环。
+- 截至 2026-04-13，`cargo test --manifest-path src-tauri\Cargo.toml` 已通过，当前共 11 个 Rust 测试通过。
 
 ## 当前文档约定
 

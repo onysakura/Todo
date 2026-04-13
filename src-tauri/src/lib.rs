@@ -7,7 +7,9 @@ mod service;
 use db::{BootstrapStatus, Database};
 use domain::Tag;
 use error::{CommandError, CommandResult};
-use service::task_service::{TaskCreateInput, TaskDetailDto, TaskService};
+use service::task_service::{
+    TaskCreateInput, TaskDetailDto, TaskService, TaskSetStatusInput, TaskUpdateInput,
+};
 use tauri::{Manager, State};
 
 struct AppState {
@@ -45,6 +47,24 @@ fn task_get_detail(
     TaskService::get_task_detail(&state.database, &series_id).map_err(CommandError::from)
 }
 
+#[tauri::command]
+fn task_update(state: State<'_, AppState>, input: TaskUpdateInput) -> CommandResult<TaskDetailDto> {
+    TaskService::update_task(&state.database, input).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn task_delete(state: State<'_, AppState>, series_id: String) -> CommandResult<()> {
+    TaskService::delete_task(&state.database, &series_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn task_set_status(
+    state: State<'_, AppState>,
+    input: TaskSetStatusInput,
+) -> CommandResult<TaskDetailDto> {
+    TaskService::set_status(&state.database, input).map_err(CommandError::from)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -63,7 +83,10 @@ pub fn run() {
             app_get_bootstrap_status,
             tag_list,
             task_create,
-            task_get_detail
+            task_get_detail,
+            task_update,
+            task_delete,
+            task_set_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

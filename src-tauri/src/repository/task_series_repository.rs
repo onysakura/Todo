@@ -48,4 +48,22 @@ impl TaskSeriesRepository {
 
         Ok(series)
     }
+
+    pub fn touch_updated_at(connection: &Connection, id: &str, updated_at: &str) -> AppResult<()> {
+        connection.execute(
+            r#"
+        UPDATE task_series
+        SET updated_at = ?2
+        WHERE id = ?1
+      "#,
+            params![id, updated_at],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn delete(connection: &Connection, id: &str) -> AppResult<()> {
+        connection.execute("DELETE FROM task_series WHERE id = ?1", [id])?;
+        Ok(())
+    }
 }

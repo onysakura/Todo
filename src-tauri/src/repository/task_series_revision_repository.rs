@@ -132,4 +132,63 @@ impl TaskSeriesRevisionRepository {
         }
         Ok(revisions)
     }
+
+    pub fn update(connection: &Connection, revision: &TaskSeriesRevision) -> AppResult<()> {
+        connection.execute(
+            r#"
+        UPDATE task_series_revision
+        SET
+          effective_from = ?2,
+          effective_until = ?3,
+          title = ?4,
+          note = ?5,
+          tag_id = ?6,
+          priority = ?7,
+          all_day = ?8,
+          start_at_time_part = ?9,
+          due_at_time_part = ?10,
+          duration_seconds = ?11,
+          recurrence_type = ?12,
+          recurrence_interval = ?13,
+          recurrence_rule_json = ?14,
+          recurrence_until = ?15,
+          danger_offset_value = ?16,
+          danger_offset_unit = ?17,
+          danger_use_workday = ?18,
+          updated_at = ?19
+        WHERE id = ?1
+      "#,
+            params![
+                revision.id,
+                revision.effective_from,
+                revision.effective_until,
+                revision.title,
+                revision.note,
+                revision.tag_id,
+                revision.priority,
+                revision.all_day,
+                revision.start_at_time_part,
+                revision.due_at_time_part,
+                revision.duration_seconds,
+                revision.recurrence_type,
+                revision.recurrence_interval,
+                revision.recurrence_rule_json,
+                revision.recurrence_until,
+                revision.danger_offset_value,
+                revision.danger_offset_unit,
+                revision.danger_use_workday,
+                revision.updated_at
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn delete_by_series_id(connection: &Connection, series_id: &str) -> AppResult<()> {
+        connection.execute(
+            "DELETE FROM task_series_revision WHERE series_id = ?1",
+            [series_id],
+        )?;
+        Ok(())
+    }
 }
