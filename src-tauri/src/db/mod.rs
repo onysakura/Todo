@@ -91,10 +91,6 @@ impl Database {
         })
     }
 
-    pub fn list_tags(&self) -> AppResult<Vec<crate::domain::Tag>> {
-        self.with_connection(TagRepository::list)
-    }
-
     pub fn with_connection<T>(&self, f: impl FnOnce(&Connection) -> AppResult<T>) -> AppResult<T> {
         let guard = self
             .connection
@@ -257,7 +253,9 @@ mod tests {
             })
             .expect("should insert tags");
 
-        let tags = database.list_tags().expect("should list tags");
+        let tags = database
+            .with_connection(TagRepository::list)
+            .expect("should list tags");
         assert_eq!(tags.len(), 2);
         assert_eq!(tags[0].name, "收件箱");
         assert_eq!(tags[1].name, "工作");

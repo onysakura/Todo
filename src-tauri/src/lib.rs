@@ -5,8 +5,11 @@ mod repository;
 mod service;
 
 use db::{BootstrapStatus, Database};
-use domain::Tag;
 use error::{CommandError, CommandResult};
+use service::holiday_service::{HolidayDto, HolidayListInput, HolidayService, HolidayUpsertInput};
+use service::settings_service::{SettingItemDto, SettingsDto, SettingsService, SettingsSetInput};
+use service::sync_service::{SyncMetaItemDto, SyncMetaSetInput, SyncService, SyncStatusDto};
+use service::tag_service::{TagCreateInput, TagDto, TagService, TagUpdateInput};
 use service::task_service::{
     TaskCreateInput, TaskDetailDto, TaskEditorDto, TaskListItemDto, TaskService,
     TaskSetStatusInput, TaskUpdateInput, UpcomingQueryInput,
@@ -31,8 +34,80 @@ fn app_get_bootstrap_status(state: State<'_, AppState>) -> CommandResult<Bootstr
 }
 
 #[tauri::command]
-fn tag_list(state: State<'_, AppState>) -> CommandResult<Vec<Tag>> {
-    state.database.list_tags().map_err(CommandError::from)
+fn tag_list(state: State<'_, AppState>) -> CommandResult<Vec<TagDto>> {
+    TagService::list(&state.database).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn tag_create(state: State<'_, AppState>, input: TagCreateInput) -> CommandResult<TagDto> {
+    TagService::create(&state.database, input).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn tag_update(state: State<'_, AppState>, input: TagUpdateInput) -> CommandResult<TagDto> {
+    TagService::update(&state.database, input).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn tag_delete(state: State<'_, AppState>, id: String) -> CommandResult<()> {
+    TagService::delete(&state.database, &id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn settings_get(state: State<'_, AppState>) -> CommandResult<SettingsDto> {
+    SettingsService::get(&state.database).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn settings_set(
+    state: State<'_, AppState>,
+    input: SettingsSetInput,
+) -> CommandResult<SettingItemDto> {
+    SettingsService::set(&state.database, input).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn settings_delete(state: State<'_, AppState>, key: String) -> CommandResult<()> {
+    SettingsService::delete(&state.database, &key).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn sync_status_get(state: State<'_, AppState>) -> CommandResult<SyncStatusDto> {
+    SyncService::get_status(&state.database).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn sync_meta_set(
+    state: State<'_, AppState>,
+    input: SyncMetaSetInput,
+) -> CommandResult<SyncMetaItemDto> {
+    SyncService::set_meta(&state.database, input).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn sync_meta_delete(state: State<'_, AppState>, key: String) -> CommandResult<()> {
+    SyncService::delete_meta(&state.database, &key).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn holiday_list(
+    state: State<'_, AppState>,
+    input: HolidayListInput,
+) -> CommandResult<Vec<HolidayDto>> {
+    HolidayService::list(&state.database, input).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn holiday_upsert(
+    state: State<'_, AppState>,
+    input: HolidayUpsertInput,
+) -> CommandResult<HolidayDto> {
+    HolidayService::upsert(&state.database, input).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn holiday_delete(state: State<'_, AppState>, date: String) -> CommandResult<()> {
+    HolidayService::delete(&state.database, &date).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -99,6 +174,18 @@ pub fn run() {
             greet,
             app_get_bootstrap_status,
             tag_list,
+            tag_create,
+            tag_update,
+            tag_delete,
+            settings_get,
+            settings_set,
+            settings_delete,
+            sync_status_get,
+            sync_meta_set,
+            sync_meta_delete,
+            holiday_list,
+            holiday_upsert,
+            holiday_delete,
             task_create,
             task_get_detail,
             task_get_editor,

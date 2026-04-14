@@ -1,145 +1,1054 @@
 <template>
-  <n-config-provider>
-    <n-message-provider>
-      <main class="shell">
-        <section class="hero">
-          <p class="eyebrow">Todo</p>
-          <h1>新的主线工程已初始化</h1>
-          <p class="summary">
-            当前阶段只验证三件事：Vue 骨架、Naive UI 日期控件、Tauri command 通路。
+  <NConfigProvider :locale="zhCN" :date-locale="dateZhCN">
+    <main class="shell">
+      <header class="page-header">
+        <div class="header-copy">
+          <p class="eyebrow">阶段 3 / 任务基础能力</p>
+          <h1>任务编辑</h1>
+        <p class="summary">
+          当前首版只聚焦单次任务的新建与编辑。左侧是未来 {{ upcomingDayCount }}
+          天入口，右侧是编辑表单。
+        </p>
+        </div>
+
+        <div class="header-actions">
+          <button class="ghost-button" type="button" @click="handleCreateNew">
+            新建任务
+          </button>
+          <button
+            class="primary-button"
+            type="button"
+            :disabled="isSaving || isEditorLoading"
+            @click="handleSave"
+          >
+            {{ saveButtonLabel }}
+          </button>
+        </div>
+      </header>
+
+      <div
+        v-if="feedback"
+        class="feedback-banner"
+        :class="`feedback-banner--${feedback.type}`"
+      >
+        {{ feedback.text }}
+      </div>
+
+      <section class="workspace">
+        <aside class="list-pane">
+          <div class="pane-header">
+            <div>
+              <p class="pane-eyebrow">近期任务</p>
+              <h2>未来 {{ upcomingDayCount }} 天</h2>
+            </div>
+            <button class="text-button" type="button" :disabled="isListLoading" @click="loadUpcomingTasks">
+              {{ isListLoading ? '刷新中' : '刷新' }}
+            </button>
+          </div>
+
+        <p class="pane-summary">
+          当前先作为编辑入口使用。
+        </p>
+
+          <div v-if="listError" class="inline-message inline-message--error">
+            {{ listError }}
+          </div>
+
+          <div v-if="isListLoading" class="task-list-empty">正在加载近期任务…</div>
+          <div v-else-if="upcomingTasks.length === 0" class="task-list-empty">
+            未来 {{ upcomingDayCount }} 天还没有任务，可以直接在右侧创建。
+          </div>
+          <div v-else class="task-list">
+            <button
+              v-for="task in upcomingTasks"
+              :key="task.seriesId"
+              class="task-card"
+              :class="{ 'task-card--active': task.seriesId === selectedSeriesId }"
+              type="button"
+              @click="handleSelectTask(task.seriesId)"
+            >
+              <div class="task-card-main">
+                <div class="task-card-head">
+                  <span class="task-title">{{ task.title }}</span>
+                  <span class="status-chip" :class="`status-chip--${task.status}`">
+                    {{ statusLabels[task.status] }}
+                  </span>
+                </div>
+                <p v-if="task.note" class="task-note">{{ task.note }}</p>
+                <div class="task-meta">
+                  <span>{{ formatDueMeta(task) }}</span>
+                  <span v-if="task.priority !== null">优先级 {{ task.priority }}</span>
+                </div>
+              </div>
+
+              <div class="task-card-foot">
+                <span
+                  v-if="task.tagId && tagsById.get(task.tagId)"
+                  class="tag-pill"
+                  :style="buildTagStyle(task.tagId)"
+                >
+                  {{ tagsById.get(task.tagId)?.name }}
+                </span>
+                <span v-else class="task-meta-muted">未分配标签</span>
+              </div>
+            </button>
+          </div>
+        </aside>
+
+        <section class="editor-pane">
+          <div class="pane-header">
+            <div>
+              <p class="pane-eyebrow">编辑表单</p>
+              <h2>{{ isEditing ? '编辑任务' : '创建任务' }}</h2>
+            </div>
+            <span v-if="isEditing" class="status-chip" :class="`status-chip--${form.currentStatus}`">
+              {{ statusLabels[form.currentStatus] }}
+            </span>
+          </div>
+
+          <p class="pane-summary">
+            当前以组件面板交互为主。
           </p>
-        </section>
 
-        <section class="panel-grid">
-          <n-card title="日期控件验证" size="small" class="panel">
-            <div class="field-stack">
-              <label class="field-label">截止时间</label>
-              <n-date-picker
-                v-model:value="dueAt"
-                type="datetime"
-                clearable
-                class="date-field"
+          <div v-if="editorError" class="inline-message inline-message--error">
+            {{ editorError }}
+          </div>
+
+          <form class="editor-form" @submit.prevent="handleSave">
+            <div class="field-grid field-grid--single">
+              <label class="field-block">
+                <span class="field-label">标题</span>
+                <NInput
+                  v-model:value="form.title"
+                  class="form-control"
+                  maxlength="120"
+                  placeholder="例如：整理周报"
+                />
+              </label>
+            </div>
+
+            <div class="field-grid">
+              <label class="field-block">
+                <span class="field-label">标签</span>
+                <NSelect
+                  v-model:value="form.tagId"
+                  class="form-control"
+                  clearable
+                  :consistent-menu-width="false"
+                  :options="tagOptions"
+                  placeholder="无标签"
+                />
+              </label>
+
+              <label class="field-block">
+                <span class="field-label">优先级</span>
+                <NSelect
+                  v-model:value="form.priority"
+                  class="form-control"
+                  clearable
+                  :consistent-menu-width="false"
+                  :options="priorityOptions"
+                  placeholder="默认"
+                />
+              </label>
+            </div>
+
+            <label class="field-block">
+              <span class="field-label">备注</span>
+              <NInput
+                v-model:value="form.note"
+                class="form-control"
+                type="textarea"
+                :autosize="{ minRows: 4, maxRows: 8 }"
+                placeholder="记录需要补充的上下文、限制条件或备注。"
               />
-            </div>
-          </n-card>
+            </label>
 
-          <n-card title="Rust Command 验证" size="small" class="panel">
-            <div class="field-stack">
-              <label class="field-label" for="name">名字</label>
-              <input id="name" v-model="name" class="text-input" />
-              <button class="primary-button" type="button" @click="handleInvoke">
-                调用 greet
-              </button>
-              <p class="result">{{ greetResult }}</p>
+            <div class="toggle-row">
+              <div class="toggle-control">
+                <NSwitch v-model:value="form.allDay" size="small" />
+                <span>全天任务</span>
+              </div>
+              <span class="field-hint">
+                全日任务不填写具体时间。
+              </span>
             </div>
-          </n-card>
+
+            <div class="schedule-card">
+              <div class="schedule-head">
+                <h3>开始信息</h3>
+                <p>表示任务进入视野的时间。</p>
+              </div>
+
+              <div class="field-grid">
+                <label class="field-block">
+                  <span class="field-label">开始日期</span>
+                  <NDatePicker
+                    :formatted-value="form.startDate"
+                    class="form-control"
+                    clearable
+                    type="date"
+                    value-format="yyyy-MM-dd"
+                    @update:formatted-value="handleStartDateChange"
+                  />
+                </label>
+
+                <label class="field-block">
+                  <span class="field-label">开始时间</span>
+                  <NTimePicker
+                    :disabled="form.allDay"
+                    :formatted-value="form.startTime"
+                    class="form-control"
+                    clearable
+                    format="HH:mm"
+                    value-format="HH:mm"
+                    @update:formatted-value="handleStartTimeChange"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="schedule-card">
+              <div class="schedule-head">
+                <h3>截止信息</h3>
+                <p>至少填写截止日期。</p>
+              </div>
+
+              <div class="field-grid">
+                <label class="field-block">
+                  <span class="field-label">截止日期</span>
+                  <NDatePicker
+                    :formatted-value="form.dueDate"
+                    class="form-control"
+                    type="date"
+                    value-format="yyyy-MM-dd"
+                    @update:formatted-value="handleDueDateChange"
+                  />
+                </label>
+
+                <label class="field-block">
+                  <span class="field-label">截止时间</span>
+                  <NTimePicker
+                    :disabled="form.allDay"
+                    :formatted-value="form.dueTime"
+                    class="form-control"
+                    clearable
+                    format="HH:mm"
+                    value-format="HH:mm"
+                    @update:formatted-value="handleDueTimeChange"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div v-if="formError" class="inline-message inline-message--error">
+              {{ formError }}
+            </div>
+
+            <div class="form-actions">
+              <button class="ghost-button" type="button" @click="handleCreateNew">
+                重置为新建
+              </button>
+              <button class="primary-button" type="submit" :disabled="isSaving || isEditorLoading">
+                {{ saveButtonLabel }}
+              </button>
+            </div>
+          </form>
         </section>
-      </main>
-    </n-message-provider>
-  </n-config-provider>
+      </section>
+    </main>
+  </NConfigProvider>
 </template>
 
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core'
-import { NCard, NConfigProvider, NDatePicker, NMessageProvider } from 'naive-ui'
-import { ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import {
+  dateZhCN,
+  NConfigProvider,
+  NDatePicker,
+  NInput,
+  NSelect,
+  NSwitch,
+  NTimePicker,
+  zhCN,
+} from 'naive-ui'
+import {
+  createTask,
+  getTaskEditor,
+  listTags,
+  queryUpcomingTasks,
+  updateTask,
+  type TagDto,
+  type TaskDetailDto,
+  type TaskEditorDto,
+  type TaskListItemDto,
+  type TaskSaveInput,
+  type TaskStatus,
+} from '../features/tasks/task-api'
 
-const dueAt = ref<number | null>(null)
-const greetResult = ref('尚未调用')
-const name = ref('Todo')
+const upcomingDayCount = 31
 
-async function handleInvoke() {
-  try {
-    greetResult.value = await invoke<string>('greet', { name: name.value })
-  } catch (error) {
-    greetResult.value = `调用失败：${String(error)}`
+const priorityOptions = [
+  { value: '1', label: '1 · 最高' },
+  { value: '2', label: '2 · 较高' },
+  { value: '3', label: '3 · 标准' },
+  { value: '4', label: '4 · 较低' },
+  { value: '5', label: '5 · 最低' },
+]
+
+const statusLabels: Record<TaskStatus, string> = {
+  pending: '未完成',
+  completed: '已完成',
+  cancelled: '已取消',
+}
+
+type FeedbackType = 'success' | 'info' | 'error'
+
+interface FeedbackState {
+  type: FeedbackType
+  text: string
+}
+
+interface TaskFormState {
+  seriesId: string | null
+  title: string
+  note: string
+  tagId: string | null
+  priority: string | null
+  allDay: boolean
+  startDate: string | null
+  startTime: string | null
+  dueDate: string
+  dueTime: string | null
+  currentStatus: TaskStatus
+}
+
+const tags = ref<TagDto[]>([])
+const upcomingTasks = ref<TaskListItemDto[]>([])
+const selectedSeriesId = ref<string | null>(null)
+
+const isListLoading = ref(false)
+const isEditorLoading = ref(false)
+const isSaving = ref(false)
+
+const listError = ref('')
+const editorError = ref('')
+const formError = ref('')
+const feedback = ref<FeedbackState | null>(null)
+
+const form = reactive<TaskFormState>(createEmptyForm())
+
+const isEditing = computed(() => Boolean(form.seriesId))
+const saveButtonLabel = computed(() => {
+  if (isSaving.value) {
+    return isEditing.value ? '保存中…' : '创建中…'
   }
+  return isEditing.value ? '保存修改' : '创建任务'
+})
+
+const tagOptions = computed(() =>
+  sortedTags.value.map((tag) => ({
+    label: tag.name,
+    value: tag.id,
+  })),
+)
+
+const sortedTags = computed(() =>
+  [...tags.value].sort((left, right) => {
+    if (left.sortOrder !== right.sortOrder) {
+      return left.sortOrder - right.sortOrder
+    }
+    return left.name.localeCompare(right.name, 'zh-CN')
+  }),
+)
+
+const tagsById = computed(() => {
+  return new Map(tags.value.map((tag) => [tag.id, tag] as const))
+})
+
+watch(
+  () => form.allDay,
+  (value) => {
+    if (value) {
+      form.startTime = ''
+      form.dueTime = ''
+    }
+  },
+)
+
+watch(
+  () => form.startDate,
+  (value) => {
+    if (!value) {
+      form.startTime = ''
+    }
+  },
+)
+
+onMounted(async () => {
+  await Promise.all([loadTags(), loadUpcomingTasks(false)])
+})
+
+async function loadTags() {
+  try {
+    tags.value = await listTags()
+  } catch (error) {
+    editorError.value = `加载标签失败：${formatError(error)}`
+  }
+}
+
+async function loadUpcomingTasks(preserveSelection = true) {
+  isListLoading.value = true
+  listError.value = ''
+
+  try {
+    const tasks = await queryUpcomingTasks({ dayCount: upcomingDayCount })
+    upcomingTasks.value = tasks
+
+    if (!preserveSelection) {
+      return
+    }
+
+    if (selectedSeriesId.value && !tasks.some((task) => task.seriesId === selectedSeriesId.value)) {
+      selectedSeriesId.value = null
+      Object.assign(form, createEmptyForm())
+    }
+  } catch (error) {
+    listError.value = `加载近期任务失败：${formatError(error)}`
+  } finally {
+    isListLoading.value = false
+  }
+}
+
+async function handleSelectTask(seriesId: string) {
+  if (seriesId === selectedSeriesId.value && isEditing.value) {
+    return
+  }
+
+  selectedSeriesId.value = seriesId
+  isEditorLoading.value = true
+  editorError.value = ''
+  formError.value = ''
+
+  try {
+    const editor = await getTaskEditor(seriesId)
+    if (!editor) {
+      throw new Error('任务不存在，可能已被删除。')
+    }
+
+    applyTaskToForm(editor)
+    feedback.value = {
+      type: 'info',
+      text: `已载入任务“${editor.title}”的编辑态。`,
+    }
+  } catch (error) {
+    selectedSeriesId.value = null
+    Object.assign(form, createEmptyForm())
+    editorError.value = `读取任务编辑态失败：${formatError(error)}`
+  } finally {
+    isEditorLoading.value = false
+  }
+}
+
+function handleCreateNew() {
+  selectedSeriesId.value = null
+  editorError.value = ''
+  formError.value = ''
+  feedback.value = {
+    type: 'info',
+    text: '已切换为新建任务模式。',
+  }
+  Object.assign(form, createEmptyForm())
+}
+
+async function handleSave() {
+  formError.value = ''
+  editorError.value = ''
+
+  const validationError = validateForm()
+  if (validationError) {
+    formError.value = validationError
+    return
+  }
+
+  isSaving.value = true
+  const editing = Boolean(form.seriesId)
+
+  try {
+    const payload = buildSaveInput()
+    const saved = editing
+      ? await updateTask({
+          seriesId: form.seriesId as string,
+          ...payload,
+        })
+      : await createTask(payload)
+
+    applyTaskToForm(saved)
+    selectedSeriesId.value = saved.seriesId
+    feedback.value = {
+      type: 'success',
+      text: editing ? '任务修改已保存。' : '任务已创建，可继续补充或调整。',
+    }
+    await loadUpcomingTasks()
+  } catch (error) {
+    formError.value = `保存失败：${formatError(error)}`
+  } finally {
+    isSaving.value = false
+  }
+}
+
+function createEmptyForm(): TaskFormState {
+  return {
+    seriesId: null,
+    title: '',
+    note: '',
+    tagId: null,
+    priority: null,
+    allDay: false,
+    startDate: null,
+    startTime: null,
+    dueDate: todayString(),
+    dueTime: null,
+    currentStatus: 'pending',
+  }
+}
+
+function applyTaskToForm(task: TaskEditorDto | TaskDetailDto) {
+  form.seriesId = task.seriesId
+  form.title = task.title
+  form.note = task.note ?? ''
+  form.tagId = task.tagId
+  form.priority = task.priority === null ? null : String(task.priority)
+  form.allDay = task.allDay
+  form.startDate = task.startDate
+  form.startTime = task.startTime
+  form.dueDate = task.dueDate
+  form.dueTime = task.dueTime
+  form.currentStatus = 'currentStatus' in task ? task.currentStatus : task.status
+}
+
+function buildSaveInput(): TaskSaveInput {
+  return {
+    title: form.title.trim(),
+    note: normalizeOptionalText(form.note),
+    tagId: form.tagId,
+    priority: normalizePriority(form.priority),
+    allDay: form.allDay,
+    startDate: form.startDate,
+    startTime: form.allDay ? null : form.startTime,
+    dueDate: form.dueDate,
+    dueTime: form.allDay ? null : form.dueTime,
+  }
+}
+
+function validateForm() {
+  if (!form.title.trim()) {
+    return '标题不能为空。'
+  }
+
+  if (!form.dueDate) {
+    return '请至少填写截止日期。'
+  }
+
+  if (form.startTime && !form.startDate) {
+    return '填写开始时间时必须同时填写开始日期。'
+  }
+
+  return ''
+}
+
+function handleStartDateChange(value: string | null) {
+  form.startDate = value
+}
+
+function handleStartTimeChange(value: string | null) {
+  form.startTime = value
+}
+
+function handleDueDateChange(value: string | null) {
+  form.dueDate = value ?? todayString()
+}
+
+function handleDueTimeChange(value: string | null) {
+  form.dueTime = value
+}
+
+function formatDueMeta(task: TaskListItemDto) {
+  const parts = [formatDateLabel(task.dueDate)]
+
+  if (task.allDay) {
+    parts.push('全天')
+  } else if (task.dueTime) {
+    parts.push(task.dueTime)
+  }
+
+  return parts.join(' · ')
+}
+
+function formatDateLabel(value: string) {
+  const [year, month, day] = value.split('-').map((part) => Number(part))
+  const date = new Date(year, month - 1, day)
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+  }).format(date)
+}
+
+function buildTagStyle(tagId: string) {
+  const tag = tagsById.value.get(tagId)
+  const colorValue = tag?.colorValue
+
+  if (!colorValue) {
+    return undefined
+  }
+
+  return {
+    borderColor: `${colorValue}55`,
+    backgroundColor: `${colorValue}18`,
+    color: colorValue,
+  }
+}
+
+function normalizeOptionalText(value: string | null) {
+  if (value === null) {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
+}
+
+function normalizePriority(value: string | null) {
+  if (!value) {
+    return null
+  }
+
+  return Number.parseInt(value, 10)
+}
+
+function formatError(error: unknown) {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return String(error)
+}
+
+function todayString() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 </script>
 
 <style scoped>
 .shell {
-  max-width: 1040px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 32px 24px 48px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+  padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  padding-left: calc(16px + env(safe-area-inset-left, 0px));
 }
 
-.hero {
-  margin-bottom: 24px;
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
 }
 
-.eyebrow {
+.header-copy {
+  max-width: 760px;
+}
+
+.eyebrow,
+.pane-eyebrow {
   margin: 0 0 8px;
   color: var(--color-accent);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 h1 {
   margin: 0;
-  font-size: clamp(28px, 4vw, 42px);
-  line-height: 1.05;
+  font-size: clamp(26px, 2.6vw, 36px);
+  line-height: 1.08;
+}
+
+h2,
+h3 {
+  margin: 0;
+}
+
+.summary,
+.pane-summary,
+.schedule-head p,
+.field-hint,
+.task-note,
+.task-meta,
+.task-meta-muted {
+  color: var(--color-text-muted);
 }
 
 .summary {
-  max-width: 680px;
-  margin: 12px 0 0;
-  color: var(--color-text-muted);
-  line-height: 1.6;
+  margin: 8px 0 0;
+  line-height: 1.55;
 }
 
-.panel-grid {
+.header-actions,
+.form-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.workspace {
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: minmax(240px, 304px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
 }
 
-.panel {
-  border-radius: 18px;
+.list-pane,
+.editor-pane {
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: linear-gradient(180deg, var(--color-surface) 0%, var(--color-surface-muted) 100%);
+  box-shadow: var(--shadow-soft);
 }
 
-.field-stack {
-  display: grid;
+.list-pane {
+  padding: 14px;
+}
+
+.editor-pane {
+  padding: 16px;
+}
+
+.pane-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 12px;
 }
 
-.field-label {
+.pane-summary {
+  margin: 8px 0 0;
   font-size: 13px;
-  font-weight: 600;
+  line-height: 1.5;
+}
+
+.task-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.task-list-empty {
+  margin-top: 14px;
+  padding: 14px 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface-raised);
   color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
-.date-field,
-.text-input,
-.primary-button {
+.task-card {
   width: 100%;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface-raised);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
 }
 
-.text-input {
-  min-height: 40px;
-  padding: 0 12px;
+.task-card:hover {
+  border-color: var(--color-border-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(23, 33, 15, 0.08);
+}
+
+.task-card--active {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, white);
+  background: linear-gradient(180deg, #ffffff 0%, #eef5ee 100%);
+  box-shadow: 0 14px 28px rgba(38, 88, 49, 0.12);
+}
+
+.task-card-main {
+  display: grid;
+  gap: 6px;
+}
+
+.task-card-head,
+.task-card-foot,
+.toggle-row,
+.schedule-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.task-card-head {
+  align-items: center;
+}
+
+.task-card-foot,
+.toggle-row {
+  margin-top: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.task-title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.task-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.task-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.status-chip,
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-chip--pending {
+  background: #eef2e5;
+  color: #586446;
+}
+
+.status-chip--completed {
+  background: #dff0e2;
+  color: #2b6f3c;
+}
+
+.status-chip--cancelled {
+  background: #f5e5e1;
+  color: #995045;
+}
+
+.tag-pill {
   border: 1px solid var(--color-border);
-  border-radius: 12px;
   background: var(--color-surface);
   color: var(--color-text);
 }
 
-.primary-button {
-  min-height: 40px;
-  border: 0;
-  border-radius: 12px;
-  background: var(--color-accent);
-  color: #fff;
+.editor-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.field-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.field-block {
+  display: grid;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+}
+
+.form-control {
+  width: 100%;
+}
+
+:deep(.form-control .n-input-wrapper),
+:deep(.form-control .n-base-selection),
+:deep(.form-control .n-date-picker),
+:deep(.form-control .n-time-picker) {
+  min-height: 38px;
+}
+
+.toggle-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
   font-weight: 600;
+}
+
+.schedule-card {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.schedule-head {
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.schedule-head p {
+  margin: 0;
+  max-width: 460px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.primary-button,
+.ghost-button,
+.text-button {
+  min-height: 38px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 13px;
   cursor: pointer;
 }
 
-.result {
-  margin: 0;
-  color: var(--color-text-muted);
+.primary-button:disabled,
+.ghost-button:disabled,
+.text-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.primary-button {
+  min-width: 112px;
+  border: 0;
+  background: linear-gradient(180deg, #397b46 0%, #2f6b3b 100%);
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(47, 107, 59, 0.22);
+}
+
+.ghost-button {
+  min-width: 112px;
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--color-text);
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+}
+
+.feedback-banner,
+.inline-message {
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 13px;
   line-height: 1.6;
-  word-break: break-word;
+}
+
+.feedback-banner {
+  margin-bottom: 14px;
+}
+
+.feedback-banner--success {
+  background: #e4f4e6;
+  color: #285d34;
+}
+
+.feedback-banner--info {
+  background: #ebf1e4;
+  color: #4b5f39;
+}
+
+.feedback-banner--error,
+.inline-message--error {
+  background: #f7e8e3;
+  color: #8f4a3f;
+}
+
+@media (max-width: 980px) {
+  .shell {
+    padding-top: calc(6px + env(safe-area-inset-top, 0px));
+    padding-right: calc(12px + env(safe-area-inset-right, 0px));
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    padding-left: calc(12px + env(safe-area-inset-left, 0px));
+  }
+
+  .page-header,
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    display: grid;
+  }
+
+  .list-pane {
+    order: 2;
+  }
+
+  .editor-pane {
+    order: 1;
+  }
+
+  .field-grid,
+  .schedule-head {
+    grid-template-columns: minmax(0, 1fr);
+    display: grid;
+  }
+
+  .pane-header {
+    align-items: start;
+  }
+}
+
+@media (max-width: 640px) {
+  .list-pane,
+  .editor-pane {
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .form-actions,
+  .header-actions {
+    width: 100%;
+  }
+
+  .primary-button,
+  .ghost-button {
+    flex: 1 1 0;
+  }
 }
 </style>

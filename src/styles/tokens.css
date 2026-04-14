@@ -3,7 +3,10 @@
   font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
   --color-bg: #f3f4ef;
   --color-surface: #ffffff;
+  --color-surface-muted: #f8f9f4;
+  --color-surface-raised: #fcfcfa;
   --color-border: #d7dacb;
+  --color-border-strong: #bcc3ad;
   --color-text: #17210f;
   --color-text-muted: #54604b;
   --color-accent: #2f6b3b;

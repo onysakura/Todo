@@ -5,6 +5,30 @@ use crate::{db::now_rfc3339, domain::SyncMetaEntry, error::AppResult};
 pub struct SyncMetaRepository;
 
 impl SyncMetaRepository {
+    pub fn list(connection: &Connection) -> AppResult<Vec<SyncMetaEntry>> {
+        let mut statement = connection.prepare(
+            r#"
+        SELECT key, value, updated_at
+        FROM sync_meta
+        ORDER BY key ASC
+      "#,
+        )?;
+
+        let rows = statement.query_map([], |row| {
+            Ok(SyncMetaEntry {
+                key: row.get(0)?,
+                value: row.get(1)?,
+                updated_at: row.get(2)?,
+            })
+        })?;
+
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
     pub fn get(connection: &Connection, key: &str) -> AppResult<Option<SyncMetaEntry>> {
         let mut statement = connection.prepare(
             r#"
@@ -45,6 +69,11 @@ impl SyncMetaRepository {
             params![key, value, now_rfc3339()?],
         )?;
 
+        Ok(())
+    }
+
+    pub fn delete(connection: &Connection, key: &str) -> AppResult<()> {
+        connection.execute("DELETE FROM sync_meta WHERE key = ?1", [key])?;
         Ok(())
     }
 }

@@ -9,7 +9,7 @@
 - 当前有效需求基线：`docs/01-requirements-spec.md`
 - 详细设计：已完成
 - 实施计划：已完成
-- 编码实现：阶段 2 进行中
+- 编码实现：阶段 3 进行中
 
 ## 当前原则
 
@@ -35,8 +35,16 @@
 - 已完成 `task_create`、`task_get_detail`、`task_update`、`task_delete`、`task_set_status` 的单次任务后端闭环
 - 已完成 `upcoming_query` 的单次任务版本，支持时间窗口过滤与排序
 - 已完成 `task_get_editor`，详情态与编辑态已分离为独立 DTO
-- 已通过 `cargo check --manifest-path src-tauri\Cargo.toml` 与 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 13 个 Rust 测试通过
-- 当前正在评估阶段 2 的收口条件，并准备继续补齐非任务类基础数据能力
+- 已完成 `tag_list`、`tag_create`、`tag_update`、`tag_delete`
+- 已完成 `settings_get`、`settings_set`、`settings_delete`
+- 已完成 `sync_status_get`、`sync_meta_set`、`sync_meta_delete`
+- 已完成 `holiday_list`、`holiday_upsert`、`holiday_delete`
+- 已通过 `cargo check --manifest-path src-tauri\Cargo.toml` 与 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 22 个 Rust 测试通过
+- 已完成单次任务新建/编辑页首版，并接入 `task_create`、`task_get_editor`、`task_update`、`tag_list`
+- 已在编辑页中落地未来 31 天任务列表的最小入口，复用 `upcoming_query`
+- 当前日期时间与选择类字段优先采用 `Naive UI` 组件面板
+- 已通过 `npm run build`、`cargo tauri build --debug` 与 `cargo tauri android build --debug -t aarch64 --apk -v`
+- 阶段 3 进行中，下一步进入任务详情页与列表收口
 
 ## 文档
 

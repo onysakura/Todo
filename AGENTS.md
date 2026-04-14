@@ -34,6 +34,9 @@
 - Rust 侧 SQLite 访问当前选型为 `rusqlite`，并启用 `bundled` 模式以降低环境依赖复杂度。
 - 前端不直接连接 WebDAV，也不直接访问 SQLite；数据库、同步、后台与平台能力统一收敛在 Rust 侧。
 - 前端整体界面以自定义设计系统为主，复杂日期时间控件例外采用 `Naive UI` 能力，不以大型 UI 库作为整站基座。
+- 当前任务编辑页首版采用“近期任务入口 + 编辑表单”双栏结构。
+- 当前日期时间与选择类字段优先使用 `Naive UI` 组件面板，不继续依赖 HTML 原生 `date` / `time` / `select` 作为正式交互基线。
+- 移动端页面根容器默认必须考虑 safe area；若使用沉浸式视口，应同步配置 `viewport-fit=cover` 与 `safe-area-inset-*` padding。
 
 ## 当前环境基线
 
@@ -56,7 +59,12 @@
 - 截至 2026-04-13，阶段 2 已完成 `task_update`、`task_delete`、`task_set_status` 的单次任务后端闭环。
 - 截至 2026-04-13，阶段 2 已完成 `upcoming_query` 的单次任务版本，支持时间窗口过滤与排序。
 - 截至 2026-04-13，阶段 2 已完成 `task_get_editor`，详情态与编辑态已分离为独立 DTO。
-- 截至 2026-04-13，`cargo test --manifest-path src-tauri\Cargo.toml` 已通过，当前共 13 个 Rust 测试通过。
+- 截至 2026-04-13，阶段 2 已完成 `tag_list`、`tag_create`、`tag_update`、`tag_delete`。
+- 截至 2026-04-13，阶段 2 已完成 `settings_get`、`settings_set`、`settings_delete`、`sync_status_get`、`sync_meta_set`、`sync_meta_delete`、`holiday_list`、`holiday_upsert`、`holiday_delete`。
+- 截至 2026-04-13，阶段 2 验收条件已满足，可转入阶段 3。
+- 截至 2026-04-13，`cargo test --manifest-path src-tauri\Cargo.toml` 已通过，当前共 22 个 Rust 测试通过。
+- 截至 2026-04-13，阶段 3 已落地单次任务新建/编辑页首版，并接入 `task_create`、`task_get_editor`、`task_update`、`tag_list` 与最小 `upcoming_query` 编辑入口。
+- 截至 2026-04-13，阶段 3 首版 UI 改动后，`npm run build`、`cargo tauri build --debug`、`cargo tauri android build --debug -t aarch64 --apk -v` 已通过。
 
 ## 当前文档约定
 

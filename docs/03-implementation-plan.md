@@ -28,7 +28,7 @@
 补充说明：
 
 - 仓库中的历史 Flutter 原型不计入当前主线进度。
-- 当前编码主线已开始，阶段 1 已完成，下一步进入阶段 2 的 Rust 数据层实现。
+- 当前编码主线已开始，阶段 1、阶段 2 已完成，下一步进入阶段 3 的任务基础能力与前端页面接入。
 
 ## 4. 实施原则
 
@@ -109,7 +109,7 @@
 
 ### 阶段 2. Rust 核心与本地数据层
 
-当前状态：`进行中`
+当前状态：`已完成`
 
 当前进展：
 
@@ -118,9 +118,9 @@
 - 已落地核心表初版：`task_series`、`task_series_revision`、`task_occurrence_override`、`tag`、`holiday_calendar`、`sync_meta`、`app_settings`。
 - 已定义首批领域对象：任务模板、版本段、单次覆盖、标签、节假日、同步元数据、应用设置。
 - 已实现 `sync_meta`、`tag`、`task_series`、`task_series_revision`、`task_occurrence_override` 的最小仓储与事务边界。
-- 已实现 `app_get_bootstrap_status`、`tag_list`、`task_create`、`task_get_detail`、`task_get_editor`、`task_update`、`task_delete`、`task_set_status`、`upcoming_query` 命令闭环。
-- 已完成单次任务创建、详情回查、编辑态投影、更新、删除、状态修改、标签校验、时间字段基础校验以及近期查询的单次任务版本。
-- 已补基础测试并通过 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 13 个 Rust 测试通过。
+- 已实现 `app_get_bootstrap_status`、`tag_list`、`tag_create`、`tag_update`、`tag_delete`、`settings_get`、`settings_set`、`settings_delete`、`sync_status_get`、`sync_meta_set`、`sync_meta_delete`、`holiday_list`、`holiday_upsert`、`holiday_delete`、`task_create`、`task_get_detail`、`task_get_editor`、`task_update`、`task_delete`、`task_set_status`、`upcoming_query` 命令闭环。
+- 已完成单次任务创建、详情回查、编辑态投影、更新、删除、状态修改、标签校验、时间字段基础校验、近期查询的单次任务版本，以及 `tag`、`app_settings`、`sync_meta`、`holiday_calendar` 读写接口。
+- 已补基础测试并通过 `cargo test --manifest-path src-tauri\Cargo.toml`，当前共 22 个 Rust 测试通过。
 
 执行清单：
 
@@ -131,9 +131,12 @@
 - `已完成` 实现单次任务基础命令：`task_create`、`task_get_detail`、`task_update`、`task_delete`、`task_set_status`。
 - `已完成` 实现面向页面读取的基础查询命令首版：`upcoming_query` 的单次任务版本。
 - `已完成` 补齐任务列表/详情/编辑态之间更稳定的 DTO 契约，新增 `task_get_editor`。
-- `进行中` 评估阶段 2 是否已满足收口条件，并整理剩余非任务类基础数据能力。
-- `未开始` 补齐 `tag`、`app_settings`、`sync_meta`、`holiday_calendar` 的更完整读写接口。
-- `未开始` 为阶段 3 的前端新建/编辑任务页接入准备更稳定的命令契约。
+- `已完成` 评估阶段 2 是否已满足收口条件，并整理剩余非任务类基础数据能力。
+- `已完成` 补齐 `tag` 的更完整读写接口。
+- `已完成` 补齐 `app_settings` 的更完整读写接口。
+- `已完成` 补齐 `sync_meta` 的更完整读写接口。
+- `已完成` 补齐 `holiday_calendar` 的更完整读写接口。
+- `已完成` 为阶段 3 的前端新建/编辑任务页接入准备更稳定的命令契约。
 
 目标：
 
@@ -165,7 +168,23 @@
 
 ### 阶段 3. 任务基础能力
 
-当前状态：`未开始`
+当前状态：`进行中`
+
+当前进展：
+
+- 阶段 2 已提供 `task_create`、`task_get_detail`、`task_get_editor`、`task_update`、`task_delete`、`task_set_status`、`tag_list` 等前端接入所需命令。
+- 已完成单次任务新建/编辑页首版，接入 `task_create`、`task_get_editor`、`task_update`、`tag_list`。
+- 已在编辑页中嵌入未来 31 天任务列表，先作为编辑入口复用 `upcoming_query`。
+- 已落地基础错误提示、空状态与最小前端校验。
+- 已完成当前首版 UI 的 Windows 与 Android 实际构建验证。
+
+执行清单：
+
+- `已完成` 实现新建/编辑任务页首版，并接入 `task_create`、`task_get_editor`、`task_update`、`tag_list`。
+- `未开始` 实现任务详情展示首版，并接入 `task_get_detail`、`task_set_status`、`task_delete`。
+- `进行中` 实现近期任务列表与选中态联动，复用 `upcoming_query`。
+- `进行中` 补齐前端字段校验、错误提示与基础空状态。
+- `进行中` 完成 Windows 与 Android 的基础表单交互适配与构建验证。
 
 目标：
 
@@ -572,9 +591,9 @@
 
 ## 11. 下一步执行建议
 
-建议下一步执行阶段 2 的当前动作：
+建议下一步执行阶段 3 的当前动作：
 
-1. 完成阶段 2 剩余评估，并明确收口前必须补齐的非任务类数据接口
-2. 补齐 `tag`、`app_settings`、`sync_meta`、`holiday_calendar` 的更完整读写接口
-3. 为阶段 3 的前端新建/编辑任务页接入准备更稳定的命令契约
-4. 视发布策略决定是否继续补齐 Android 多 ABI 构建
+1. 实现任务详情展示首版，并接入 `task_get_detail`、`task_set_status`、`task_delete`
+2. 收敛近期任务列表的正式信息结构与选中联动，避免当前编辑入口形态和最终视图混用
+3. 继续补齐前端字段校验、错误提示与空状态细节
+4. 根据后续 Android 交互验证结果，继续细化双端表单适配

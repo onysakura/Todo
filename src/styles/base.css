@@ -10,11 +10,19 @@ body,
 
 body {
   margin: 0;
-  background: linear-gradient(180deg, #eff1e6 0%, var(--color-bg) 100%);
+  background:
+    radial-gradient(circle at top left, rgba(111, 156, 103, 0.12), transparent 32%),
+    linear-gradient(180deg, #eff1e6 0%, var(--color-bg) 100%);
   color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }

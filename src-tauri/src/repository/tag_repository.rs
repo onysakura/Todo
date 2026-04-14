@@ -90,4 +90,56 @@ impl TagRepository {
 
         Ok(None)
     }
+
+    pub fn get_by_name(connection: &Connection, name: &str) -> AppResult<Option<Tag>> {
+        let mut statement = connection.prepare(
+            r#"
+        SELECT id, name, color_value, sort_order, created_at, updated_at
+        FROM tag
+        WHERE name = ?1
+      "#,
+        )?;
+
+        let mut rows = statement.query([name])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color_value: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            }));
+        }
+
+        Ok(None)
+    }
+
+    pub fn update(
+        connection: &Connection,
+        id: &str,
+        name: &str,
+        color_value: Option<&str>,
+        sort_order: i64,
+    ) -> AppResult<()> {
+        connection.execute(
+            r#"
+        UPDATE tag
+        SET
+          name = ?2,
+          color_value = ?3,
+          sort_order = ?4,
+          updated_at = ?5
+        WHERE id = ?1
+      "#,
+            params![id, name, color_value, sort_order, now_rfc3339()?],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn delete(connection: &Connection, id: &str) -> AppResult<()> {
+        connection.execute("DELETE FROM tag WHERE id = ?1", [id])?;
+        Ok(())
+    }
 }
