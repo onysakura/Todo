@@ -5,10 +5,9 @@
         <div class="header-copy">
           <p class="eyebrow">阶段 3 / 任务基础能力</p>
           <h1>任务编辑</h1>
-        <p class="summary">
-          当前首版只聚焦单次任务的新建与编辑。左侧是未来 {{ upcomingDayCount }}
-          天入口，右侧是编辑表单。
-        </p>
+          <p class="summary">
+            左侧查看未来 {{ upcomingDayCount }} 天任务，右侧创建或编辑任务。
+          </p>
         </div>
 
         <div class="header-actions">
@@ -45,10 +44,6 @@
               {{ isListLoading ? '刷新中' : '刷新' }}
             </button>
           </div>
-
-        <p class="pane-summary">
-          当前先作为编辑入口使用。
-        </p>
 
           <div v-if="listError" class="inline-message inline-message--error">
             {{ listError }}
@@ -105,10 +100,6 @@
               {{ statusLabels[form.currentStatus] }}
             </span>
           </div>
-
-          <p class="pane-summary">
-            当前以组件面板交互为主。
-          </p>
 
           <div v-if="editorError" class="inline-message inline-message--error">
             {{ editorError }}
@@ -169,15 +160,11 @@
                 <NSwitch v-model:value="form.allDay" size="small" />
                 <span>全天任务</span>
               </div>
-              <span class="field-hint">
-                全日任务不填写具体时间。
-              </span>
             </div>
 
             <div class="schedule-card">
               <div class="schedule-head">
                 <h3>开始信息</h3>
-                <p>表示任务进入视野的时间。</p>
               </div>
 
               <div class="field-grid">
@@ -211,7 +198,6 @@
             <div class="schedule-card">
               <div class="schedule-head">
                 <h3>截止信息</h3>
-                <p>至少填写截止日期。</p>
               </div>
 
               <div class="field-grid">
@@ -690,9 +676,6 @@ h3 {
 }
 
 .summary,
-.pane-summary,
-.schedule-head p,
-.field-hint,
 .task-note,
 .task-meta,
 .task-meta-muted {
@@ -739,12 +722,6 @@ h3 {
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-}
-
-.pane-summary {
-  margin: 8px 0 0;
-  font-size: 13px;
-  line-height: 1.5;
 }
 
 .task-list {
@@ -925,14 +902,7 @@ h3 {
 
 .schedule-head {
   align-items: flex-start;
-  margin-bottom: 10px;
-}
-
-.schedule-head p {
-  margin: 0;
-  max-width: 460px;
-  font-size: 12px;
-  line-height: 1.6;
+  margin-bottom: 8px;
 }
 
 .primary-button,
