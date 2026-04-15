@@ -6,7 +6,7 @@
           <p class="eyebrow">阶段 3 / 任务基础能力</p>
           <h1>任务编辑</h1>
           <p class="summary">
-            左侧查看未来 {{ upcomingDayCount }} 天任务，右侧创建或编辑任务。
+            可查看未来 {{ upcomingDayCount }} 天任务，并创建或编辑任务。
           </p>
         </div>
 
@@ -215,6 +215,9 @@
                   maxlength="120"
                   placeholder="例如：整理周报"
                 />
+                <span v-if="validationErrors.title" class="field-error">
+                  {{ validationErrors.title }}
+                </span>
               </label>
             </div>
 
@@ -278,6 +281,9 @@
                     value-format="yyyy-MM-dd"
                     @update:formatted-value="handleStartDateChange"
                   />
+                  <span v-if="validationErrors.startDate" class="field-error">
+                    {{ validationErrors.startDate }}
+                  </span>
                 </label>
 
                 <label class="field-block">
@@ -291,6 +297,9 @@
                     value-format="HH:mm"
                     @update:formatted-value="handleStartTimeChange"
                   />
+                  <span v-if="validationErrors.startTime" class="field-error">
+                    {{ validationErrors.startTime }}
+                  </span>
                 </label>
               </div>
             </div>
@@ -310,6 +319,9 @@
                     value-format="yyyy-MM-dd"
                     @update:formatted-value="handleDueDateChange"
                   />
+                  <span v-if="validationErrors.dueDate" class="field-error">
+                    {{ validationErrors.dueDate }}
+                  </span>
                 </label>
 
                 <label class="field-block">
@@ -323,11 +335,19 @@
                     value-format="HH:mm"
                     @update:formatted-value="handleDueTimeChange"
                   />
+                  <span v-if="validationErrors.dueTime" class="field-error">
+                    {{ validationErrors.dueTime }}
+                  </span>
                 </label>
               </div>
             </div>
 
-            <div v-if="formError" class="inline-message inline-message--error">
+            <div v-if="validationErrors.range || formError" class="inline-message inline-message--error">
+              <span v-if="validationErrors.range">{{ validationErrors.range }}</span>
+              <span v-else>{{ formError }}</span>
+            </div>
+
+            <div v-else-if="formError" class="inline-message inline-message--error">
               {{ formError }}
             </div>
 
@@ -335,7 +355,11 @@
               <button class="ghost-button" type="button" @click="handleCreateNew">
                 重置为新建
               </button>
-              <button class="primary-button" type="submit" :disabled="isSaving || isEditorLoading">
+              <button
+                class="primary-button"
+                type="submit"
+                :disabled="isSaving || isEditorLoading || hasBlockingValidation"
+              >
                 {{ saveButtonLabel }}
               </button>
             </div>
@@ -412,6 +436,15 @@ interface TaskFormState {
   currentStatus: TaskStatus
 }
 
+interface FormValidationErrors {
+  title: string
+  startDate: string
+  startTime: string
+  dueDate: string
+  dueTime: string
+  range: string
+}
+
 const tags = ref<TagDto[]>([])
 const upcomingTasks = ref<TaskListItemDto[]>([])
 const selectedSeriesId = ref<string | null>(null)
@@ -447,6 +480,18 @@ const tagOptions = computed(() =>
   })),
 )
 
+const validationErrors = computed<FormValidationErrors>(() => validateFormFields())
+const hasBlockingValidation = computed(() =>
+  Boolean(
+    validationErrors.value.title ||
+      validationErrors.value.startDate ||
+      validationErrors.value.startTime ||
+      validationErrors.value.dueDate ||
+      validationErrors.value.dueTime ||
+      validationErrors.value.range,
+  ),
+)
+
 const sortedTags = computed(() =>
   [...tags.value].sort((left, right) => {
     if (left.sortOrder !== right.sortOrder) {
@@ -474,7 +519,7 @@ watch(
   () => form.startDate,
   (value) => {
     if (!value) {
-      form.startTime = ''
+      form.startTime = null
     }
   },
 )
@@ -741,39 +786,81 @@ function buildSaveInput(): TaskSaveInput {
 }
 
 function validateForm() {
+  const errors = validationErrors.value
+  if (errors.title) {
+    return errors.title
+  }
+  if (errors.startDate) {
+    return errors.startDate
+  }
+  if (errors.startTime) {
+    return errors.startTime
+  }
+  if (errors.dueDate) {
+    return errors.dueDate
+  }
+  if (errors.dueTime) {
+    return errors.dueTime
+  }
+  if (errors.range) {
+    return errors.range
+  }
+  return ''
+}
+
+function validateFormFields(): FormValidationErrors {
+  const errors: FormValidationErrors = {
+    title: '',
+    startDate: '',
+    startTime: '',
+    dueDate: '',
+    dueTime: '',
+    range: '',
+  }
+
   if (!form.title.trim()) {
-    return '标题不能为空。'
+    errors.title = '标题不能为空。'
   }
 
   if (!form.dueDate) {
-    return '请至少填写截止日期。'
+    errors.dueDate = '请至少填写截止日期。'
   }
 
   if (!form.allDay && !form.dueTime) {
-    return '非全天任务必须填写截止时间。'
+    errors.dueTime = '非全天任务必须填写截止时间。'
   }
 
   if (form.startTime && !form.startDate) {
-    return '填写开始时间时必须同时填写开始日期。'
+    errors.startDate = '填写开始时间时必须同时填写开始日期。'
   }
 
-  return ''
+  const startStamp = buildDateTimeStamp(form.startDate, form.startTime, form.allDay)
+  const dueStamp = buildDateTimeStamp(form.dueDate, form.dueTime, form.allDay)
+  if (startStamp !== null && dueStamp !== null && startStamp > dueStamp) {
+    errors.range = '开始时间不能晚于截止时间。'
+  }
+
+  return errors
 }
 
 function handleStartDateChange(value: string | null) {
   form.startDate = value
+  formError.value = ''
 }
 
 function handleStartTimeChange(value: string | null) {
   form.startTime = value
+  formError.value = ''
 }
 
 function handleDueDateChange(value: string | null) {
   form.dueDate = value ?? todayString()
+  formError.value = ''
 }
 
 function handleDueTimeChange(value: string | null) {
   form.dueTime = value
+  formError.value = ''
 }
 
 function formatDueMeta(task: TaskListItemDto) {
@@ -860,6 +947,15 @@ function normalizePriority(value: string | null) {
   }
 
   return Number.parseInt(value, 10)
+}
+
+function buildDateTimeStamp(dateValue: string | null, timeValue: string | null, allDay: boolean) {
+  if (!dateValue) {
+    return null
+  }
+
+  const effectiveTime = allDay ? '00:00' : timeValue ?? '00:00'
+  return new Date(`${dateValue}T${effectiveTime}:00`).getTime()
 }
 
 function formatError(error: unknown) {
@@ -1182,6 +1278,12 @@ h3 {
   font-weight: 700;
   color: var(--color-text-muted);
   letter-spacing: 0.02em;
+}
+
+.field-error {
+  font-size: 12px;
+  color: #8f4a3f;
+  line-height: 1.45;
 }
 
 .form-control {
