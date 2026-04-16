@@ -66,8 +66,9 @@
 - 截至 2026-04-13，`cargo test --manifest-path src-tauri\Cargo.toml` 已通过，当前共 22 个 Rust 测试通过。
 - 截至 2026-04-13，阶段 3 已落地单次任务新建/编辑页首版，并接入 `task_create`、`task_get_editor`、`task_update`、`tag_list` 与最小 `upcoming_query` 编辑入口。
 - 截至 2026-04-13，阶段 3 首版 UI 改动后，`npm run build`、`cargo tauri build --debug`、`cargo tauri android build --debug -t aarch64 --apk -v` 已通过。
-- 截至 2026-04-14，阶段 4 已完成 `upcoming_query` 的重复实例展开首版，当前支持按天、周、月、年重复、间隔值、循环截止日期与稳定 `occurrence_key`。
-- 截至 2026-04-14，阶段 4 的 Rust 测试已补到 25 个通过；按小时重复仍未实现，阶段 4 整体仍处于进行中。
+- 截至 2026-04-14，阶段 4 已完成 `upcoming_query` 的重复实例展开首版，支持按天、周、月、年重复、间隔值、循环截止日期与稳定 `occurrence_key`。
+- 截至 2026-04-16，阶段 4 已补齐按小时重复展开；当前 `upcoming_query` 已支持按小时、天、周、月、年重复。
+- 截至 2026-04-16，阶段 4 的 Rust 测试已补到 26 个通过，阶段 4 验收条件已满足，可转入阶段 5。
 
 ## 当前文档约定
 

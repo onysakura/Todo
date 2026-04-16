@@ -24,6 +24,7 @@ const STATUS_COMPLETED: &str = "completed";
 const STATUS_CANCELLED: &str = "cancelled";
 const TASK_KIND_SINGLE: &str = "single";
 const TASK_KIND_RECURRING: &str = "recurring";
+const RECURRENCE_HOUR: &str = "hour";
 const RECURRENCE_DAY: &str = "day";
 const RECURRENCE_WEEK: &str = "week";
 const RECURRENCE_MONTH: &str = "month";
@@ -151,7 +152,7 @@ struct ParsedTaskInput {
 struct ScheduleSeed {
     effective_from: Date,
     start_time: Option<Time>,
-    due_time: Option<Time>,
+    base_start_anchor: PrimitiveDateTime,
     duration_seconds: i64,
 }
 
@@ -164,6 +165,7 @@ struct ScheduledOccurrence {
     due_date: String,
     due_time: Option<String>,
     due_date_value: Date,
+    due_anchor_value: PrimitiveDateTime,
 }
 
 pub struct TaskService;
@@ -745,6 +747,54 @@ fn expand_occurrences_for_revision(
         .map(|value| parse_date(value, "版本结束日期"))
         .transpose()?;
     let first_occurrence = build_scheduled_occurrence(revision, &seed, seed.effective_from, false)?;
+    let window_start_anchor = PrimitiveDateTime::new(window_start, Time::MIDNIGHT);
+    let window_end_exclusive_anchor =
+        PrimitiveDateTime::new(window_end + Duration::days(1), Time::MIDNIGHT);
+
+    if recurrence_type == RECURRENCE_HOUR {
+        let mut occurrence_index = initial_hourly_occurrence_index(
+            first_occurrence.due_anchor_value,
+            recurrence_interval,
+            window_start_anchor,
+        );
+        let mut items = Vec::new();
+
+        loop {
+            let occurrence_start_anchor = shift_hourly_recurrence_start(
+                seed.base_start_anchor,
+                recurrence_interval,
+                occurrence_index,
+            );
+            if let Some(value) = effective_until {
+                if occurrence_start_anchor.date() > value {
+                    break;
+                }
+            }
+
+            let occurrence = build_scheduled_occurrence_at_anchor(
+                revision,
+                &seed,
+                occurrence_start_anchor,
+                false,
+            )?;
+            if let Some(value) = recurrence_until {
+                if occurrence.due_date_value > value {
+                    break;
+                }
+            }
+            if occurrence.due_anchor_value >= window_end_exclusive_anchor {
+                break;
+            }
+            if occurrence.due_anchor_value >= window_start_anchor {
+                items.push(occurrence);
+            }
+
+            occurrence_index += 1;
+        }
+
+        return Ok(items);
+    }
+
     let mut occurrence_index = initial_occurrence_index(
         recurrence_type,
         first_occurrence.due_date_value,
@@ -786,13 +836,19 @@ fn expand_occurrences_for_revision(
 }
 
 fn build_schedule_seed(revision: &TaskSeriesRevision) -> AppResult<ScheduleSeed> {
+    let effective_from = parse_date(&revision.effective_from, "版本开始日期")?;
+    let start_time = revision
+        .start_at_time_part
+        .map(seconds_to_time)
+        .transpose()?;
+
     Ok(ScheduleSeed {
-        effective_from: parse_date(&revision.effective_from, "版本开始日期")?,
-        start_time: revision
-            .start_at_time_part
-            .map(seconds_to_time)
-            .transpose()?,
-        due_time: revision.due_at_time_part.map(seconds_to_time).transpose()?,
+        effective_from,
+        start_time,
+        base_start_anchor: PrimitiveDateTime::new(
+            effective_from,
+            start_time.unwrap_or(Time::MIDNIGHT),
+        ),
         duration_seconds: revision.duration_seconds.unwrap_or(0),
     })
 }
@@ -805,15 +861,24 @@ fn build_scheduled_occurrence(
 ) -> AppResult<ScheduledOccurrence> {
     let start_anchor =
         PrimitiveDateTime::new(start_date, seed.start_time.unwrap_or(Time::MIDNIGHT));
+    build_scheduled_occurrence_at_anchor(revision, seed, start_anchor, use_legacy_occurrence_key)
+}
+
+fn build_scheduled_occurrence_at_anchor(
+    revision: &TaskSeriesRevision,
+    seed: &ScheduleSeed,
+    start_anchor: PrimitiveDateTime,
+    use_legacy_occurrence_key: bool,
+) -> AppResult<ScheduledOccurrence> {
     let due_anchor = start_anchor + Duration::seconds(seed.duration_seconds);
     let due_date = due_anchor.date();
     let due_time = if revision.all_day {
         None
     } else {
-        seed.due_time.or(Some(due_anchor.time()))
+        Some(due_anchor.time())
     };
 
-    let start_date_string = format_date(start_date)?;
+    let start_date_string = format_date(start_anchor.date())?;
     let due_date_string = format_date(due_date)?;
     let occurrence_key = if use_legacy_occurrence_key {
         due_date_string.clone()
@@ -825,10 +890,15 @@ fn build_scheduled_occurrence(
         revision_id: revision.id.clone(),
         occurrence_key,
         start_date: Some(start_date_string),
-        start_time: seed.start_time.map(format_time).transpose()?,
+        start_time: if revision.all_day {
+            None
+        } else {
+            Some(format_time(start_anchor.time())?)
+        },
         due_date: due_date_string,
         due_time: due_time.map(format_time).transpose()?,
         due_date_value: due_date,
+        due_anchor_value: due_anchor,
     })
 }
 
@@ -888,6 +958,19 @@ fn initial_occurrence_index(
     }
 }
 
+fn initial_hourly_occurrence_index(
+    first_due_anchor: PrimitiveDateTime,
+    recurrence_interval: i64,
+    window_start_anchor: PrimitiveDateTime,
+) -> i64 {
+    if window_start_anchor <= first_due_anchor {
+        return 0;
+    }
+
+    let diff_seconds = (window_start_anchor - first_due_anchor).whole_seconds();
+    ceil_div_positive(diff_seconds, recurrence_interval * 3600)
+}
+
 fn ceil_div_positive(value: i64, divisor: i64) -> i64 {
     if value <= 0 {
         0
@@ -927,6 +1010,9 @@ fn shift_recurrence_start(
     occurrence_index: i64,
 ) -> AppResult<Date> {
     match recurrence_type {
+        RECURRENCE_HOUR => Err(AppError::State(
+            "按小时重复应使用时间锚点展开，不应走日期位移逻辑".to_string(),
+        )),
         RECURRENCE_DAY => Ok(base_start + Duration::days(recurrence_interval * occurrence_index)),
         RECURRENCE_WEEK => {
             Ok(base_start + Duration::days(recurrence_interval * occurrence_index * 7))
@@ -939,6 +1025,14 @@ fn shift_recurrence_start(
             "当前仅支持 day、week、month、year 重复，收到: {other}"
         ))),
     }
+}
+
+fn shift_hourly_recurrence_start(
+    base_start_anchor: PrimitiveDateTime,
+    recurrence_interval: i64,
+    occurrence_index: i64,
+) -> PrimitiveDateTime {
+    base_start_anchor + Duration::hours(recurrence_interval * occurrence_index)
 }
 
 fn add_months_clamped(date: Date, month_delta: i64) -> AppResult<Date> {
@@ -1083,6 +1177,7 @@ fn sort_key(task: &TaskListItemDto) -> (String, String, i64, String) {
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
+    use time::Time;
     use uuid::Uuid;
 
     use super::{
@@ -1108,6 +1203,32 @@ mod tests {
         recurrence_interval: i64,
         recurrence_until: Option<&str>,
     ) -> (TaskSeries, TaskSeriesRevision) {
+        insert_recurring_task_with_schedule(
+            database,
+            title,
+            effective_from,
+            recurrence_type,
+            recurrence_interval,
+            recurrence_until,
+            true,
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn insert_recurring_task_with_schedule(
+        database: &Database,
+        title: &str,
+        effective_from: &str,
+        recurrence_type: &str,
+        recurrence_interval: i64,
+        recurrence_until: Option<&str>,
+        all_day: bool,
+        start_time: Option<Time>,
+        due_time: Option<Time>,
+        duration_seconds: Option<i64>,
+    ) -> (TaskSeries, TaskSeriesRevision) {
         let now = now_rfc3339().expect("should build timestamp");
         let series = TaskSeries {
             id: Uuid::new_v4().to_string(),
@@ -1125,10 +1246,10 @@ mod tests {
             note: Some("重复任务".to_string()),
             tag_id: None,
             priority: Some(2),
-            all_day: true,
-            start_at_time_part: None,
-            due_at_time_part: None,
-            duration_seconds: None,
+            all_day,
+            start_at_time_part: start_time.map(super::time_to_seconds),
+            due_at_time_part: due_time.map(super::time_to_seconds),
+            duration_seconds,
             recurrence_type: Some(recurrence_type.to_string()),
             recurrence_interval: Some(recurrence_interval),
             recurrence_rule_json: None,
@@ -1493,6 +1614,49 @@ mod tests {
 
         let due_dates: Vec<String> = tasks.into_iter().map(|item| item.due_date).collect();
         assert_eq!(due_dates, vec!["2026-04-14", "2026-04-16", "2026-04-18"]);
+    }
+
+    #[test]
+    fn upcoming_query_expands_hourly_recurring_tasks_within_window() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        insert_recurring_task_with_schedule(
+            &database,
+            "轮询检查",
+            "2026-04-10",
+            "hour",
+            4,
+            Some("2026-04-11"),
+            false,
+            Some(Time::from_hms(20, 0, 0).expect("should build start time")),
+            Some(Time::from_hms(21, 0, 0).expect("should build due time")),
+            Some(3600),
+        );
+
+        let tasks = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-11".to_string()),
+                day_count: Some(1),
+            },
+        )
+        .expect("should query hourly recurrence");
+
+        let due_times: Vec<String> = tasks
+            .iter()
+            .map(|item| {
+                item.due_time
+                    .clone()
+                    .expect("hourly task should have due time")
+            })
+            .collect();
+        assert_eq!(
+            due_times,
+            vec!["01:00", "05:00", "09:00", "13:00", "17:00", "21:00"]
+        );
+        assert!(tasks.iter().all(|item| item.due_date == "2026-04-11"));
     }
 
     #[test]
