@@ -75,6 +75,9 @@
 - 截至 2026-06-30，阶段 6 后端投影服务已完成：`TaskListItemDto` 补 `created_at`、近期视图排序键对齐详细设计 7.2（状态分组→优先级→危险日占位→截止→开始→创建）、新增 `task_calendar_query` 日历投影命令并注册到 `lib.rs`、`upcoming_query` 与 `calendar_query` 共用 `collect_list_items` 展开逻辑。
 - 截至 2026-06-30，阶段 6 后端 Rust 测试已补到 40 个通过，`cargo check` 与 `cargo test` 已通过；前端视图组件（6.6-6.12）留待非沙箱环境。
 - 截至 2026-06-30，TRAE 沙箱为全新 Ubuntu 24.04 clone，apt 系统依赖（libwebkit2gtk-4.1-dev 等）需重新安装才能跑 `cargo check`/`cargo test`；沙箱 Node 24 / Rust 1.92 与基线 Node 22 / Rust 1.91 存在差异。
+- 截至 2026-06-30，阶段 6 前端视图组件已全部完成：`CalendarView.vue` 纵向日历流（月份分隔、空日补齐、今日高亮）、`RecentView.vue` 近期列表（未完成/已完成分组）、`TaskCard.vue` 共享卡片（状态弱化、开始/截止时间可视表达、危险日占位）、`AppShell.vue` 演化为日历/近期/编辑三视图导航。
+- 截至 2026-06-30，前端测试框架已引入 vitest + @vue/test-utils + jsdom，共 27 个前端测试通过；`npm run build` 已通过。
+- 截至 2026-06-30，阶段 6 全部任务（6.1-6.12）已完成，状态标识为 `已完成`，可转入阶段 7。
 
 ## 当前文档约定
 

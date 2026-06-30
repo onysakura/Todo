@@ -1,13 +1,38 @@
 <template>
   <NConfigProvider :locale="zhCN" :date-locale="dateZhCN">
     <main class="shell">
+      <nav class="view-nav">
+        <button
+          class="nav-tab"
+          :class="{ 'nav-tab--active': currentView === 'calendar' }"
+          type="button"
+          @click="switchView('calendar')"
+        >
+          日历
+        </button>
+        <button
+          class="nav-tab"
+          :class="{ 'nav-tab--active': currentView === 'recent' }"
+          type="button"
+          @click="switchView('recent')"
+        >
+          近期
+        </button>
+        <button
+          class="nav-tab"
+          :class="{ 'nav-tab--active': currentView === 'editor' }"
+          type="button"
+          @click="switchView('editor')"
+        >
+          编辑
+        </button>
+      </nav>
+
       <header class="page-header">
         <div class="header-copy">
-          <p class="eyebrow">阶段 3 / 任务基础能力</p>
-          <h1>任务编辑</h1>
-          <p class="summary">
-            可查看未来 {{ upcomingDayCount }} 天任务，并创建或编辑任务。
-          </p>
+          <p class="eyebrow">{{ viewEyebrow }}</p>
+          <h1>{{ viewTitle }}</h1>
+          <p class="summary">{{ viewSummary }}</p>
         </div>
 
         <div class="header-actions">
@@ -15,6 +40,7 @@
             新建任务
           </button>
           <button
+            v-if="currentView === 'editor'"
             class="primary-button"
             type="button"
             :disabled="isSaving || isEditorLoading"
@@ -33,7 +59,21 @@
         {{ feedback.text }}
       </div>
 
-      <section class="workspace">
+      <CalendarView
+        v-if="currentView === 'calendar'"
+        ref="calendarViewRef"
+        :tags-by-id="tagsById"
+        :selected-series-id="selectedSeriesId"
+        @select="handleTaskSelectFromView"
+      />
+      <RecentView
+        v-else-if="currentView === 'recent'"
+        ref="recentViewRef"
+        :tags-by-id="tagsById"
+        :selected-series-id="selectedSeriesId"
+        @select="handleTaskSelectFromView"
+      />
+      <section v-else class="workspace">
         <aside class="list-pane">
           <div class="pane-header">
             <div>
@@ -382,6 +422,8 @@ import {
   NTimePicker,
   zhCN,
 } from 'naive-ui'
+import CalendarView from '../views/CalendarView.vue'
+import RecentView from '../views/RecentView.vue'
 import {
   createTask,
   deleteTask,
@@ -400,6 +442,45 @@ import {
 } from '../features/tasks/task-api'
 
 const upcomingDayCount = 31
+
+type ViewName = 'calendar' | 'recent' | 'editor'
+
+const currentView = ref<ViewName>('calendar')
+const calendarViewRef = ref<InstanceType<typeof CalendarView> | null>(null)
+const recentViewRef = ref<InstanceType<typeof RecentView> | null>(null)
+
+const viewEyebrow = computed(() => {
+  switch (currentView.value) {
+    case 'calendar':
+      return '阶段 6 / 日历视图'
+    case 'recent':
+      return '阶段 6 / 近期视图'
+    case 'editor':
+      return '阶段 3 / 任务编辑'
+  }
+})
+
+const viewTitle = computed(() => {
+  switch (currentView.value) {
+    case 'calendar':
+      return '日历'
+    case 'recent':
+      return '近期'
+    case 'editor':
+      return '任务编辑'
+  }
+})
+
+const viewSummary = computed(() => {
+  switch (currentView.value) {
+    case 'calendar':
+      return `按天查看未来 ${upcomingDayCount} 天任务分布。`
+    case 'recent':
+      return `按排序查看未来 ${upcomingDayCount} 天任务。`
+    case 'editor':
+      return `可查看未来 ${upcomingDayCount} 天任务，并创建或编辑任务。`
+  }
+})
 
 const priorityOptions = [
   { value: '1', label: '1 · 最高' },
@@ -564,6 +645,20 @@ async function loadUpcomingTasks(preserveSelection = true) {
   }
 }
 
+function switchView(view: ViewName) {
+  currentView.value = view
+}
+
+async function handleTaskSelectFromView(seriesId: string) {
+  currentView.value = 'editor'
+  await handleSelectTask(seriesId)
+}
+
+function refreshViews() {
+  calendarViewRef.value?.loadCalendar()
+  recentViewRef.value?.loadRecentTasks()
+}
+
 async function handleSelectTask(seriesId: string) {
   if (seriesId === selectedSeriesId.value && selectedTaskDetail.value) {
     return
@@ -627,6 +722,7 @@ async function handleEditSelectedTask() {
 }
 
 function handleCreateNew() {
+  currentView.value = 'editor'
   selectedSeriesId.value = null
   selectedTaskDetail.value = null
   detailError.value = ''
@@ -670,6 +766,7 @@ async function handleSave() {
       text: editing ? '任务修改已保存。' : '任务已创建，可继续补充或调整。',
     }
     await loadUpcomingTasks()
+    refreshViews()
   } catch (error) {
     formError.value = `保存失败：${formatError(error)}`
   } finally {
@@ -699,6 +796,7 @@ async function handleSetStatus(status: TaskStatus) {
       text: `任务状态已更新为${statusLabels[detail.status]}。`,
     }
     await loadUpcomingTasks()
+    refreshViews()
   } catch (error) {
     detailError.value = `更新任务状态失败：${formatError(error)}`
   } finally {
@@ -734,6 +832,7 @@ async function handleDeleteSelectedTask() {
       text: '任务已删除。',
     }
     await loadUpcomingTasks()
+    refreshViews()
   } catch (error) {
     detailError.value = `删除任务失败：${formatError(error)}`
   } finally {
@@ -997,6 +1096,41 @@ function todayString() {
   padding-right: calc(16px + env(safe-area-inset-right, 0px));
   padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   padding-left: calc(16px + env(safe-area-inset-left, 0px));
+}
+
+.view-nav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface-muted);
+}
+
+.nav-tab {
+  flex: 1;
+  min-height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.nav-tab:hover {
+  color: var(--color-text);
+}
+
+.nav-tab--active {
+  background: var(--color-surface);
+  color: var(--color-accent);
+  box-shadow: 0 2px 8px rgba(23, 33, 15, 0.06);
 }
 
 .page-header {

@@ -7,11 +7,13 @@
     "dev": "vite --host 0.0.0.0 --port 1420",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2",
     "@tanstack/vue-query": "^5",
+    "@tauri-apps/api": "^2",
     "naive-ui": "^2",
     "pinia": "^3",
     "vue": "^3"
@@ -20,8 +22,11 @@
     "@tauri-apps/cli": "^2",
     "@types/node": "^24",
     "@vitejs/plugin-vue": "^6",
+    "@vue/test-utils": "^2.4.11",
+    "jsdom": "^29.1.1",
     "typescript": "^5",
     "vite": "^7",
+    "vitest": "^4.1.9",
     "vue-tsc": "^3"
   }
 }

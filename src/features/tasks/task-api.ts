@@ -23,6 +23,12 @@ export interface TaskListItemDto {
   dueDate: string
   dueTime: string | null
   status: TaskStatus
+  createdAt: string
+}
+
+export interface CalendarDayDto {
+  date: string
+  items: TaskListItemDto[]
 }
 
 export interface TaskEditorDto {
@@ -92,6 +98,10 @@ export async function listTags() {
 
 export async function queryUpcomingTasks(input: UpcomingQueryInput) {
   return invoke<TaskListItemDto[]>('upcoming_query', { input })
+}
+
+export async function queryCalendarTasks(input: UpcomingQueryInput) {
+  return invoke<CalendarDayDto[]>('task_calendar_query', { input })
 }
 
 export async function getTaskDetail(seriesId: string) {
