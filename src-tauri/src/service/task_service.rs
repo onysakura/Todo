@@ -163,6 +163,15 @@ pub struct TaskListItemDto {
     pub due_date: String,
     pub due_time: Option<String>,
     pub status: String,
+    pub created_at: String,
+}
+
+/// 日历视图单日投影：该日期下挂的所有任务实例（可能为空，空日用于前端连续渲染）。
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarDayDto {
+    pub date: String,
+    pub items: Vec<TaskListItemDto>,
 }
 
 #[derive(Debug, Clone)]
@@ -817,58 +826,43 @@ impl TaskService {
         database: &Database,
         input: UpcomingQueryInput,
     ) -> AppResult<Vec<TaskListItemDto>> {
-        let start_date = input
-            .start_date
-            .as_deref()
-            .map(|value| parse_date(value, "查询开始日期"))
-            .transpose()?
-            .unwrap_or_else(today_utc);
-        let day_count = input.day_count.unwrap_or(31);
-        if day_count == 0 {
-            return Err(AppError::Validation("查询天数必须大于 0".to_string()));
-        }
-        let end_date = start_date + Duration::days(day_count as i64 - 1);
-
+        let (start_date, end_date) = parse_query_window(&input)?;
         database.with_connection(|connection| {
-            let series_list = TaskSeriesRepository::list_active(connection)?;
-            let mut items = Vec::new();
-
-            for series in series_list {
-                let revisions =
-                    TaskSeriesRevisionRepository::list_by_series_id(connection, &series.id)?;
-                if revisions.is_empty() {
-                    continue;
-                }
-
-                let overrides =
-                    TaskOccurrenceOverrideRepository::list_by_series_id(connection, &series.id)?;
-                let override_map: HashMap<String, TaskOccurrenceOverride> = overrides
-                    .into_iter()
-                    .map(|item| (item.occurrence_key.clone(), item))
-                    .collect();
-
-                for revision in revisions {
-                    let occurrences = expand_occurrences_for_revision(
-                        &series.kind,
-                        &revision,
-                        start_date,
-                        end_date,
-                    )?;
-
-                    for occurrence in occurrences {
-                        let occurrence_override = override_map.get(&occurrence.occurrence_key);
-                        items.push(build_task_list_item(
-                            &series,
-                            &revision,
-                            occurrence,
-                            occurrence_override,
-                        ));
-                    }
-                }
-            }
-
+            let mut items = collect_list_items(connection, start_date, end_date)?;
             items.sort_by(|left, right| sort_key(left).cmp(&sort_key(right)));
             Ok(items)
+        })
+    }
+
+    /// 日历视图投影：按 `due_date` 聚合为按天分组的列表，空日补齐占位，便于前端连续渲染。
+    pub fn calendar_query(
+        database: &Database,
+        input: UpcomingQueryInput,
+    ) -> AppResult<Vec<CalendarDayDto>> {
+        let (start_date, end_date) = parse_query_window(&input)?;
+        database.with_connection(|connection| {
+            let mut items = collect_list_items(connection, start_date, end_date)?;
+            items.sort_by(|left, right| sort_key(left).cmp(&sort_key(right)));
+
+            let mut buckets: HashMap<String, Vec<TaskListItemDto>> = HashMap::new();
+            for item in items {
+                buckets.entry(item.due_date.clone()).or_default().push(item);
+            }
+
+            let mut days = Vec::with_capacity((end_date - start_date).whole_days() as usize + 1);
+            let mut cursor = start_date;
+            while cursor <= end_date {
+                let date_key = cursor
+                    .format(DATE_FORMAT)
+                    .map_err(|error| AppError::Time(format!("格式化日历日期失败: {error}")))?;
+                let day_items = buckets.remove(&date_key).unwrap_or_default();
+                days.push(CalendarDayDto {
+                    date: date_key,
+                    items: day_items,
+                });
+                cursor = cursor + Duration::days(1);
+            }
+            Ok(days)
         })
     }
 
@@ -1202,6 +1196,7 @@ fn build_task_list_item(
         status: occurrence_override
             .map(|value| value.status.clone())
             .unwrap_or_else(|| STATUS_PENDING.to_string()),
+        created_at: series.created_at.clone(),
     }
 }
 
@@ -1694,12 +1689,92 @@ fn today_utc() -> Date {
     time::OffsetDateTime::now_utc().date()
 }
 
-fn sort_key(task: &TaskListItemDto) -> (String, String, i64, String) {
+/// 解析近期/日历视图的查询窗口，返回 `(start_date, end_date)`。
+fn parse_query_window(input: &UpcomingQueryInput) -> AppResult<(Date, Date)> {
+    let start_date = input
+        .start_date
+        .as_deref()
+        .map(|value| parse_date(value, "查询开始日期"))
+        .transpose()?
+        .unwrap_or_else(today_utc);
+    let day_count = input.day_count.unwrap_or(31);
+    if day_count == 0 {
+        return Err(AppError::Validation("查询天数必须大于 0".to_string()));
+    }
+    let end_date = start_date + Duration::days(day_count as i64 - 1);
+    Ok((start_date, end_date))
+}
+
+/// 在指定时间窗口内展开所有任务系列实例并构建列表项（未排序）。
+/// 供 `upcoming_query` 与 `calendar_query` 共用。
+fn collect_list_items(
+    connection: &rusqlite::Connection,
+    start_date: Date,
+    end_date: Date,
+) -> AppResult<Vec<TaskListItemDto>> {
+    let series_list = TaskSeriesRepository::list_active(connection)?;
+    let mut items = Vec::new();
+
+    for series in series_list {
+        let revisions = TaskSeriesRevisionRepository::list_by_series_id(connection, &series.id)?;
+        if revisions.is_empty() {
+            continue;
+        }
+
+        let overrides =
+            TaskOccurrenceOverrideRepository::list_by_series_id(connection, &series.id)?;
+        let override_map: HashMap<String, TaskOccurrenceOverride> = overrides
+            .into_iter()
+            .map(|item| (item.occurrence_key.clone(), item))
+            .collect();
+
+        for revision in revisions {
+            let occurrences = expand_occurrences_for_revision(
+                &series.kind,
+                &revision,
+                start_date,
+                end_date,
+            )?;
+
+            for occurrence in occurrences {
+                let occurrence_override = override_map.get(&occurrence.occurrence_key);
+                items.push(build_task_list_item(
+                    &series,
+                    &revision,
+                    occurrence,
+                    occurrence_override,
+                ));
+            }
+        }
+    }
+
+    Ok(items)
+}
+
+// 排序键对齐详细设计 7.2：状态分组 → 优先级 → 危险日临近程度 → 截止时间 → 开始时间 → 创建时间。
+// 危险日临近程度依赖阶段 7，本轮统一占位 0，键位保留待接入。
+fn sort_key(task: &TaskListItemDto) -> (u8, i64, i64, String, String, String) {
+    let status_group: u8 = if task.status == STATUS_PENDING {
+        0
+    } else {
+        1
+    };
+    let danger_proximity: i64 = 0;
     (
-        task.due_date.clone(),
-        task.due_time.clone().unwrap_or_else(|| "00:00".to_string()),
+        status_group,
         task.priority.unwrap_or(999),
-        task.occurrence_key.clone(),
+        danger_proximity,
+        format!(
+            "{}T{}",
+            task.due_date,
+            task.due_time.clone().unwrap_or_else(|| "00:00".to_string())
+        ),
+        format!(
+            "{}T{}",
+            task.start_date.clone().unwrap_or_else(|| "9999-12-31".to_string()),
+            task.start_time.clone().unwrap_or_else(|| "00:00".to_string())
+        ),
+        task.created_at.clone(),
     )
 }
 
@@ -2946,5 +3021,183 @@ mod tests {
         assert_eq!(overridden.note.as_deref(), Some("已单次完成"));
         assert_eq!(overridden.priority, Some(1));
         assert_eq!(overridden.status, "completed");
+    }
+
+    #[test]
+    fn calendar_query_groups_items_by_due_date_and_fills_empty_days() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        // 两个任务同一天截止，另一个隔一天截止
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "同日A".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(1),
+                all_day: true,
+                start_date: Some("2026-05-10".to_string()),
+                start_time: None,
+                due_date: "2026-05-10".to_string(),
+                due_time: None,
+                recurrence_type: None,
+                recurrence_interval: None,
+                recurrence_until: None,
+            },
+        )
+        .expect("should create task A");
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "同日B".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(2),
+                all_day: true,
+                start_date: Some("2026-05-10".to_string()),
+                start_time: None,
+                due_date: "2026-05-10".to_string(),
+                due_time: None,
+                recurrence_type: None,
+                recurrence_interval: None,
+                recurrence_until: None,
+            },
+        )
+        .expect("should create task B");
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "隔日C".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(1),
+                all_day: true,
+                start_date: Some("2026-05-12".to_string()),
+                start_time: None,
+                due_date: "2026-05-12".to_string(),
+                due_time: None,
+                recurrence_type: None,
+                recurrence_interval: None,
+                recurrence_until: None,
+            },
+        )
+        .expect("should create task C");
+
+        let days = TaskService::calendar_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-05-10".to_string()),
+                day_count: Some(3),
+            },
+        )
+        .expect("should query calendar");
+
+        // 3 天窗口连续补齐，5-11 为空日
+        assert_eq!(days.len(), 3);
+        assert_eq!(days[0].date, "2026-05-10");
+        assert_eq!(days[1].date, "2026-05-11");
+        assert_eq!(days[2].date, "2026-05-12");
+        // 同日聚合两条，按优先级排序（A 优先级 1 在前）
+        assert_eq!(days[0].items.len(), 2);
+        assert_eq!(days[0].items[0].title, "同日A");
+        assert_eq!(days[0].items[1].title, "同日B");
+        // 空日补齐
+        assert!(days[1].items.is_empty());
+        assert_eq!(days[2].items.len(), 1);
+        assert_eq!(days[2].items[0].title, "隔日C");
+    }
+
+    #[test]
+    fn calendar_query_returns_empty_days_when_no_tasks() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        let days = TaskService::calendar_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-06-01".to_string()),
+                day_count: Some(5),
+            },
+        )
+        .expect("should query empty calendar");
+
+        assert_eq!(days.len(), 5);
+        assert!(days.iter().all(|day| day.items.is_empty()));
+        assert_eq!(days[0].date, "2026-06-01");
+        assert_eq!(days[4].date, "2026-06-05");
+    }
+
+    #[test]
+    fn upcoming_query_sorts_pending_before_terminal_status() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        // 已完成任务
+        let completed = TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "已完成".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(1),
+                all_day: true,
+                start_date: Some("2026-07-01".to_string()),
+                start_time: None,
+                due_date: "2026-07-01".to_string(),
+                due_time: None,
+                recurrence_type: None,
+                recurrence_interval: None,
+                recurrence_until: None,
+            },
+        )
+        .expect("should create completed task");
+        TaskService::set_status(
+            &database,
+            TaskSetStatusInput {
+                series_id: completed.series_id,
+                status: "completed".to_string(),
+            },
+        )
+        .expect("should mark completed");
+
+        // 未完成任务，截止时间晚于已完成任务，但未完成应排在前面
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "未完成".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(5),
+                all_day: true,
+                start_date: Some("2026-07-05".to_string()),
+                start_time: None,
+                due_date: "2026-07-05".to_string(),
+                due_time: None,
+                recurrence_type: None,
+                recurrence_interval: None,
+                recurrence_until: None,
+            },
+        )
+        .expect("should create pending task");
+
+        let tasks = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-07-01".to_string()),
+                day_count: Some(10),
+            },
+        )
+        .expect("should query upcoming");
+
+        assert_eq!(tasks.len(), 2);
+        // 状态分组：未完成（0）先于已完成（1），即使截止时间更晚
+        assert_eq!(tasks[0].title, "未完成");
+        assert_eq!(tasks[0].status, "pending");
+        assert_eq!(tasks[1].title, "已完成");
+        assert_eq!(tasks[1].status, "completed");
     }
 }
