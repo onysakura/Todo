@@ -11,7 +11,7 @@ use service::settings_service::{SettingItemDto, SettingsDto, SettingsService, Se
 use service::sync_service::{SyncMetaItemDto, SyncMetaSetInput, SyncService, SyncStatusDto};
 use service::tag_service::{TagCreateInput, TagDto, TagService, TagUpdateInput};
 use service::task_service::{
-    TaskCreateInput, TaskDetailDto, TaskEditorDto, TaskListItemDto, TaskService,
+    CalendarDayDto, TaskCreateInput, TaskDetailDto, TaskEditorDto, TaskListItemDto, TaskService,
     TaskSetOccurrenceStatusInput, TaskSetStatusInput, TaskUpdateInput, TaskUpdateTemplateFromInput,
     UpcomingQueryInput,
 };
@@ -194,6 +194,14 @@ fn upcoming_query(
     TaskService::upcoming_query(&state.database, input).map_err(CommandError::from)
 }
 
+#[tauri::command]
+fn task_calendar_query(
+    state: State<'_, AppState>,
+    input: UpcomingQueryInput,
+) -> CommandResult<Vec<CalendarDayDto>> {
+    TaskService::calendar_query(&state.database, input).map_err(CommandError::from)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -233,7 +241,8 @@ pub fn run() {
             task_set_status,
             task_set_occurrence_status,
             task_update_template_from,
-            upcoming_query
+            upcoming_query,
+            task_calendar_query
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

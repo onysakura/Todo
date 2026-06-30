@@ -72,6 +72,9 @@
 - 截至 2026-06-29，阶段 5 已完成 `task_create` 重复任务创建、`task_set_occurrence_status` 单次覆盖写入、`task_get_occurrence_detail` / `task_get_occurrence_editor` 单次覆盖读取投影、`task_update_template_from` 模板版本段截断与未来覆盖保留/清除策略、`task_delete` 重复任务整体删除。
 - 截至 2026-06-29，阶段 5 的 Rust 测试已补到 37 个通过，`npm run build` 与 `cargo tauri build --debug`（Windows）已通过。
 - 截至 2026-06-29，阶段 5 的 Android aarch64 Rust 交叉编译已通过，但 Tauri 符号链接创建受 TRAE 沙箱限制未能完成最终 APK 打包，需在非沙箱环境复验。
+- 截至 2026-06-30，阶段 6 后端投影服务已完成：`TaskListItemDto` 补 `created_at`、近期视图排序键对齐详细设计 7.2（状态分组→优先级→危险日占位→截止→开始→创建）、新增 `task_calendar_query` 日历投影命令并注册到 `lib.rs`、`upcoming_query` 与 `calendar_query` 共用 `collect_list_items` 展开逻辑。
+- 截至 2026-06-30，阶段 6 后端 Rust 测试已补到 40 个通过，`cargo check` 与 `cargo test` 已通过；前端视图组件（6.6-6.12）留待非沙箱环境。
+- 截至 2026-06-30，TRAE 沙箱为全新 Ubuntu 24.04 clone，apt 系统依赖（libwebkit2gtk-4.1-dev 等）需重新安装才能跑 `cargo check`/`cargo test`；沙箱 Node 24 / Rust 1.92 与基线 Node 22 / Rust 1.91 存在差异。
 
 ## 当前文档约定
 
