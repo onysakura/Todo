@@ -78,6 +78,10 @@
 - 截至 2026-06-30，阶段 6 前端视图组件已全部完成：`CalendarView.vue` 纵向日历流（月份分隔、空日补齐、今日高亮）、`RecentView.vue` 近期列表（未完成/已完成分组）、`TaskCard.vue` 共享卡片（状态弱化、开始/截止时间可视表达、危险日占位）、`AppShell.vue` 演化为日历/近期/编辑三视图导航。
 - 截至 2026-06-30，前端测试框架已引入 vitest + @vue/test-utils + jsdom，共 27 个前端测试通过；`npm run build` 已通过。
 - 截至 2026-06-30，阶段 6 全部任务（6.1-6.12）已完成，状态标识为 `已完成`，可转入阶段 7。
+- 截至 2026-07-01，沙箱 apt 对外网络完全不通（archive.ubuntu.com 与 mirrors.aliyun.com 均超时），无法安装 `libglib2.0-dev`/`libwebkit2gtk-4.1-dev` 等系统依赖；后端 `cargo check`/`cargo test` 暂时只能在非沙箱环境执行。沙箱内 npm registry 需切换为 `https://registry.npmmirror.com` 才能 `npm install`。
+- 截至 2026-07-01，阶段 7 已完成后端危险日与工作日计算闭环：新增 `danger_service.rs`（`DangerRule`/`validate_danger_input`/`resolve_danger_rule`/`compute_danger_at`/`WorkdayCalculator`，9 个单元测试）、`task_service.rs` 扩展三个 Input 的 danger 字段与 `TaskListItemDto.danger_at`、`collect_list_items` 接入危险日投影（预取区间 `[window_start - 366 天, window_end]`，单条失败降级 `None`）、`sort_key` 第三项替换为 `danger_at` 字符串字典序、新增 `task_set_occurrence_danger` 命令并注册到 `lib.rs`；`task_service.rs` 新增 8 个单元测试。
+- 截至 2026-07-01，阶段 7 前端 `npm run build` 已通过、27 个前端测试全通过；后端 `cargo test` 受沙箱系统依赖限制未能执行，代码已通过人工 review，需在非沙箱环境复验。阶段 7 全部任务（7.1-7.13）已完成，状态标识为 `已完成`，可转入阶段 8。
+- 阶段 7 危险日设计基线：`danger_offset_unit` 仅支持 `hour`/`day`；`danger_use_workday = true` 仅对 `day` 有意义；`danger_at` 投影优先级为 `override_danger_at` > 模板规则计算 > `None`；格式为无时区 ISO 字符串 `YYYY-MM-DDTHH:MM:SS`（与 `occurrence_key` 锚点一致）；写入校验严格（`validate_danger_input`），投影读取宽容（`resolve_danger_rule` 脏数据返回 `None`）。
 
 ## 当前文档约定
 
