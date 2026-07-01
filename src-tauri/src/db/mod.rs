@@ -114,6 +114,55 @@ impl Database {
         Ok(result)
     }
 
+    /// 当前数据库文件路径。
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// 将当前数据库导出为一份一致性快照文件（`VACUUM INTO`）。
+    pub fn export_snapshot(&self, dest: &Path) -> AppResult<()> {
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        self.with_connection(|connection| {
+            let escaped = dest.to_string_lossy().replace('\'', "''");
+            connection.execute_batch(&format!("VACUUM INTO '{}';", escaped))?;
+            Ok(())
+        })
+    }
+
+    /// 用远端快照覆盖当前活连接内容：在线备份覆盖主库，保留本地 `device_id`，重跑迁移。
+    pub fn import_snapshot(&self, source: &Path) -> AppResult<()> {
+        self.with_connection(|connection| {
+            let device_id = SyncMetaRepository::get_device_id(connection)?;
+            // 先把 WAL 落盘并截断，避免覆盖后被旧 WAL 遮蔽
+            let _ = connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+
+            let source_connection = Connection::open(source)?;
+            {
+                let mut backup = rusqlite::backup::Backup::new(&source_connection, connection)?;
+                loop {
+                    if matches!(
+                        backup.step(100)?,
+                        rusqlite::backup::StepResult::Done
+                    ) {
+                        break;
+                    }
+                }
+            }
+
+            let _ = connection.execute_batch("PRAGMA foreign_keys = ON;");
+            // 恢复本地 device_id（被远端快照覆盖后需写回）
+            if !device_id.is_empty() {
+                SyncMetaRepository::upsert(connection, "device_id", &device_id)?;
+            }
+            Ok(())
+        })?;
+        // 远端快照 schema 可能较旧，重跑迁移（幂等）
+        self.run_migrations()?;
+        Ok(())
+    }
+
     fn ensure_device_id(&self) -> AppResult<()> {
         self.with_connection(|connection| {
             if SyncMetaRepository::get_device_id(connection)?.is_empty() {
@@ -146,7 +195,7 @@ impl Database {
         })
     }
 
-    fn schema_version(&self) -> AppResult<i64> {
+    pub fn schema_version(&self) -> AppResult<i64> {
         self.with_connection(|connection| {
             let version = connection
                 .query_row(

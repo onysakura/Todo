@@ -8,7 +8,9 @@ use db::{BootstrapStatus, Database};
 use error::{CommandError, CommandResult};
 use service::holiday_service::{HolidayDto, HolidayListInput, HolidayService, HolidayUpsertInput};
 use service::settings_service::{SettingItemDto, SettingsDto, SettingsService, SettingsSetInput};
-use service::sync_service::{SyncMetaItemDto, SyncMetaSetInput, SyncService, SyncStatusDto};
+use service::sync_service::{
+    SaveCheckResult, SyncMetaItemDto, SyncMetaSetInput, SyncOutcome, SyncService, SyncStatusDto,
+};
 use service::tag_service::{TagCreateInput, TagDto, TagService, TagUpdateInput};
 use service::task_service::{
     CalendarDayDto, TaskCreateInput, TaskDetailDto, TaskEditorDto, TaskListItemDto, TaskService,
@@ -88,6 +90,23 @@ fn sync_meta_set(
 #[tauri::command]
 fn sync_meta_delete(state: State<'_, AppState>, key: String) -> CommandResult<()> {
     SyncService::delete_meta(&state.database, &key).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn sync_run(state: State<'_, AppState>) -> CommandResult<SyncOutcome> {
+    let store = SyncService::build_store(&state.database).map_err(CommandError::from)?;
+    SyncService::run_sync(&state.database, &store).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn sync_check_before_save(state: State<'_, AppState>) -> CommandResult<SaveCheckResult> {
+    let store = SyncService::build_store(&state.database).map_err(CommandError::from)?;
+    SyncService::check_before_save(&state.database, &store).map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn sync_mark_dirty(state: State<'_, AppState>) -> CommandResult<()> {
+    SyncService::mark_dirty(&state.database).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -236,6 +255,9 @@ pub fn run() {
             sync_status_get,
             sync_meta_set,
             sync_meta_delete,
+            sync_run,
+            sync_check_before_save,
+            sync_mark_dirty,
             holiday_list,
             holiday_upsert,
             holiday_delete,

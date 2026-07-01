@@ -26,6 +26,14 @@
         >
           编辑
         </button>
+        <button
+          class="nav-tab"
+          :class="{ 'nav-tab--active': currentView === 'sync' }"
+          type="button"
+          @click="switchView('sync')"
+        >
+          同步
+        </button>
       </nav>
 
       <header class="page-header">
@@ -72,6 +80,10 @@
         :tags-by-id="tagsById"
         :selected-series-id="selectedSeriesId"
         @select="handleTaskSelectFromView"
+      />
+      <SyncView
+        v-else-if="currentView === 'sync'"
+        ref="syncViewRef"
       />
       <section v-else class="workspace">
         <aside class="list-pane">
@@ -424,6 +436,7 @@ import {
 } from 'naive-ui'
 import CalendarView from '../views/CalendarView.vue'
 import RecentView from '../views/RecentView.vue'
+import SyncView from '../views/SyncView.vue'
 import {
   createTask,
   deleteTask,
@@ -443,11 +456,12 @@ import {
 
 const upcomingDayCount = 31
 
-type ViewName = 'calendar' | 'recent' | 'editor'
+type ViewName = 'calendar' | 'recent' | 'editor' | 'sync'
 
 const currentView = ref<ViewName>('calendar')
 const calendarViewRef = ref<InstanceType<typeof CalendarView> | null>(null)
 const recentViewRef = ref<InstanceType<typeof RecentView> | null>(null)
+const syncViewRef = ref<InstanceType<typeof SyncView> | null>(null)
 
 const viewEyebrow = computed(() => {
   switch (currentView.value) {
@@ -457,6 +471,8 @@ const viewEyebrow = computed(() => {
       return '阶段 6 / 近期视图'
     case 'editor':
       return '阶段 3 / 任务编辑'
+    case 'sync':
+      return '阶段 8 / 同步视图'
   }
 })
 
@@ -468,6 +484,8 @@ const viewTitle = computed(() => {
       return '近期'
     case 'editor':
       return '任务编辑'
+    case 'sync':
+      return '同步'
   }
 })
 
@@ -479,6 +497,8 @@ const viewSummary = computed(() => {
       return `按排序查看未来 ${upcomingDayCount} 天任务。`
     case 'editor':
       return `可查看未来 ${upcomingDayCount} 天任务，并创建或编辑任务。`
+    case 'sync':
+      return '配置 WebDAV 并执行远程优先同步，冲突时以远端为准。'
   }
 })
 

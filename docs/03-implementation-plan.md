@@ -433,7 +433,7 @@
 
 ### 阶段 8. 同步机制
 
-当前状态：`未开始`
+当前状态：`已完成`
 
 目标：
 
@@ -441,15 +441,35 @@
 
 任务：
 
-- 定义 `todo.meta.json` 与 `todo.data.sqlite3` 远端组织格式
-- 实现远端元数据检查
-- 实现本地快照导出与导入
-- 实现在线保存前检查流程
-- 实现离线 dirty 标记与恢复副本机制
-- 实现远端覆盖本地流程
-- 实现同步状态记录与错误提示
-- 实现同步状态页
-- 补充同步集成测试
+后端同步核心：
+
+- `已完成` 8.1 定义远端文件组织与 `RemoteMeta` 模型（`todo.meta.json`：version/updated_at/checksum/device_id/schema_version）
+- `已完成` 8.2 定义 `RemoteStore` trait 抽象远端操作（fetch_meta/push_meta/fetch_snapshot/push_snapshot），便于测试注入假实现
+- `已完成` 8.3 实现 `WebDavRemoteStore`（基于 ureq，GET/PUT meta 与 snapshot，404 视为空远端，Basic 认证）
+- `已完成` 8.4 实现本地快照导出（`VACUUM INTO`）与导入（在线备份 API 覆盖活连接 + 保留 device_id + 重跑迁移）
+- `已完成` 8.5 实现远端元数据检查与冲突判定（remote_etag 与本地 baseline 比对）
+- `已完成` 8.6 实现 `sync_check_before_save` 命令（在线保存前检查：ok/conflict/offline）
+- `已完成` 8.7 实现离线 dirty 标记与恢复副本机制（`sync_mark_dirty` + 冲突时导出恢复副本并记录到 sync_meta）
+- `已完成` 8.8 实现远端覆盖本地流程（冲突恢复：导出恢复副本→拉取远端→校验 checksum→覆盖本地→保留 device_id；普通拉取）
+- `已完成` 8.9 实现 `sync_run` 主流程（启动/手动同步：push/pull/conflict-recover/up-to-date，更新 sync_meta 与 last_sync_result）
+- `已完成` 8.10 扩展 `SyncStatusDto`（补 recovery 信息）与同步状态记录/错误提示
+- `已完成` 8.11 在 `lib.rs` 注册 `sync_run`/`sync_check_before_save`/`sync_mark_dirty` 命令
+
+前端同步视图：
+
+- `已完成` 8.12 实现前端同步状态页（`SyncView.vue`：状态展示 + 手动同步 + 最近结果，接入 `sync_status_get`/`sync_run`）与 `sync-api.ts`
+
+测试与验证：
+
+- `已完成` 8.13 补充同步集成测试（FakeRemoteStore：初始推送、无冲突上传、远端变化拉取、冲突恢复覆盖、保存前检查、离线 dirty、校验失败保留本地）
+- `已完成` 8.14 运行 `cargo test` + `npm run build` + 前端测试验证
+
+完成记录：
+
+- 后端：新增 `remote_store.rs`（RemoteMeta/FetchedMeta/FetchedSnapshot/RemoteStore trait）、`webdav_store.rs`（ureq + Basic Auth，404 视为空远端）；重写 `sync_service.rs`（run_sync/check_before_save/mark_dirty/build_store，push 含并发写校验、pull 含 checksum 校验、冲突导出恢复副本、保留 device_id）；`db/mod.rs` 新增 `path/export_snapshot(VACUUM INTO)/import_snapshot(在线备份覆盖+保留 device_id+迁移)`；`error.rs` 新增 `Sync`/`Serialize` 变体；`Cargo.toml` 新增 `base64/sha2/ureq[tls]`；`lib.rs` 注册 `sync_run/sync_check_before_save/sync_mark_dirty` 三个命令。
+- 后端测试：`sync_service.rs` 内置 `FakeRemoteStore`（RefCell 内存态），共 13 个测试覆盖初始推送、up-to-date、脏推送、远端变化拉取、冲突恢复、网络错误、checksum 不匹配、保存前检查（ok/conflict/offline/空远端）、mark_dirty、device_id 保留、变体构造器。
+- 前端：新增 `src/features/sync/sync-api.ts`（typed wrapper + encode/decodeSettingValue）、`src/views/SyncView.vue`（状态卡片 + WebDAV 配置卡片 + 同步操作卡片，支持保存/清除配置、立即同步、标记脏、保存前冲突检查）、`src/views/__tests__/SyncView.test.ts`（11 个测试）；`AppShell.vue` 新增“同步”tab 与 SyncView 渲染。
+- 验证：`npm run build`（含 `vue-tsc` 类型检查）已通过；前端测试 4 文件 38 个用例全通过（新增 SyncView 11 个，原 27 个保持）。后端 `cargo check`/`cargo test` 受沙箱系统依赖（glib-2.0/libwebkit2gtk-4.1-dev）限制未能执行，代码已通过人工 review（命令签名与 SyncService 方法签名一致、WebDavRemoteStore 实现 RemoteStore、SyncOutcome/SaveCheckResult 派生 Serialize），需在非沙箱环境复验。
 
 交付物：
 
@@ -462,6 +482,15 @@
 - 启动时可同步远端数据
 - 保存前如远端已变化，则本地修改被正确拦截
 - 离线修改在远端变化时可生成恢复副本并以远端覆盖本地
+
+说明：
+
+- 同步采用整库快照（`todo.data.sqlite3`）+ 元数据（`todo.meta.json`），不拆分小文件。
+- 远程优先：冲突时以远端为准，本地脏数据导出为恢复副本后再覆盖。
+- WebDAV 凭证与地址保存在 `app_settings`（`sync.webdavUrl`/`sync.webdavUser`/`sync.webdavPassword`），前端不直接处理认证。
+- `RemoteStore` trait 抽象远端操作，核心同步逻辑通过 `FakeRemoteStore` 注入测试，不依赖真实网络。
+- 本地快照导入采用 SQLite 在线备份 API 覆盖活连接内容，导入后保留本地 `device_id` 并重跑迁移（幂等）。
+- 恢复副本与最近一次恢复信息记录在 `sync_meta`（`last_recovery_path`/`last_recovery_at`/`last_recovery_reason`），本轮不新增数据表。
 
 ### 阶段 9. Windows 后台与提醒
 

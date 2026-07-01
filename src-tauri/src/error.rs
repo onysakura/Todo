@@ -18,6 +18,10 @@ pub enum AppError {
     Time(String),
     #[error("参数校验失败: {0}")]
     Validation(String),
+    #[error("同步错误: {0}")]
+    Sync(String),
+    #[error("序列化错误: {0}")]
+    Serialize(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Serialize)]
@@ -36,6 +40,8 @@ impl From<AppError> for CommandError {
             AppError::State(_) => "state_error",
             AppError::Time(_) => "time_error",
             AppError::Validation(_) => "validation_error",
+            AppError::Sync(_) => "sync_error",
+            AppError::Serialize(_) => "serialize_error",
         };
 
         Self {
