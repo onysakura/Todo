@@ -171,6 +171,108 @@
         {{ saveCheck.message }}
       </div>
     </section>
+
+    <section class="card reminder-card">
+      <div class="card-head">
+        <h3>提醒设置</h3>
+      </div>
+
+      <p class="action-hint">
+        危险日与截止提醒由后台计算并交由系统通知调度；关闭后取消已有通知。
+      </p>
+
+      <div class="form-grid">
+        <label class="field-block field-block--check">
+          <input
+            v-model="reminderForm.enabled"
+            class="checkbox-input"
+            type="checkbox"
+            :disabled="isSavingReminder"
+          />
+          <span class="field-label">启用提醒</span>
+        </label>
+
+        <label class="field-block">
+          <span class="field-label">提醒窗口（小时，默认 24）</span>
+          <input
+            v-model.number="reminderForm.windowHours"
+            class="text-input"
+            type="number"
+            min="1"
+            :disabled="isSavingReminder"
+          />
+        </label>
+
+        <label class="field-block">
+          <span class="field-label">后台同步间隔（分钟，最小 5，默认 15）</span>
+          <input
+            v-model.number="reminderForm.intervalMinutes"
+            class="text-input"
+            type="number"
+            min="5"
+            :disabled="isSavingReminder"
+          />
+        </label>
+      </div>
+
+      <div class="card-actions">
+        <button
+          class="ghost-button"
+          type="button"
+          :disabled="isSavingReminder"
+          @click="handleSaveReminderSettings"
+        >
+          {{ isSavingReminder ? '保存中…' : '保存提醒设置' }}
+        </button>
+      </div>
+    </section>
+
+    <section class="card preview-card">
+      <div class="card-head">
+        <h3>提醒预览</h3>
+        <button
+          class="text-button"
+          type="button"
+          :disabled="isPreviewing"
+          @click="handlePreviewReminders"
+        >
+          {{ isPreviewing ? '加载中' : '刷新预览' }}
+        </button>
+      </div>
+
+      <div v-if="isPreviewing && !reminderPlan" class="loading-message">正在计算近期提醒…</div>
+      <div v-else-if="reminderPlan && reminderPlan.items.length === 0" class="action-hint">
+        近期无待触发提醒。
+      </div>
+      <ul v-else-if="reminderPlan" class="reminder-list">
+        <li
+          v-for="item in reminderPlan.items"
+          :key="`${item.seriesId}::${item.occurrenceKey}::${item.kind}`"
+          class="reminder-item"
+        >
+          <span class="reminder-time">{{ item.triggerAt }}</span>
+          <span class="reminder-kind" :class="`reminder-kind--${item.kind}`">
+            {{ item.kind === 'danger' ? '危险日' : '截止' }}
+          </span>
+          <span class="reminder-title">{{ item.title }}</span>
+        </li>
+      </ul>
+
+      <div class="card-actions">
+        <button
+          class="primary-button"
+          type="button"
+          :disabled="isRebuilding"
+          @click="handleRebuildReminders"
+        >
+          {{ isRebuilding ? '重建中…' : '立即重建提醒' }}
+        </button>
+      </div>
+
+      <div v-if="rebuildMessage" class="inline-message" :class="`inline-message--${rebuildKind}`">
+        {{ rebuildMessage }}
+      </div>
+    </section>
   </div>
 </template>
 
@@ -190,6 +292,11 @@ import {
   type SyncOutcome,
   type SyncStatusDto,
 } from '../features/sync/sync-api'
+import {
+  previewReminders,
+  rebuildReminders,
+  type ReminderPlan,
+} from '../features/reminder/reminder-api'
 
 const status = ref<SyncStatusDto | null>(null)
 const isLoadingStatus = ref(false)
@@ -212,6 +319,24 @@ const form = reactive<ConfigForm>({
   webdavUser: '',
   webdavPassword: '',
 })
+
+interface ReminderForm {
+  enabled: boolean
+  windowHours: number
+  intervalMinutes: number
+}
+
+const reminderForm = reactive<ReminderForm>({
+  enabled: true,
+  windowHours: 24,
+  intervalMinutes: 15,
+})
+
+const isSavingReminder = ref(false)
+const isPreviewing = ref(false)
+const isRebuilding = ref(false)
+const reminderPlan = ref<ReminderPlan | null>(null)
+const rebuildMessage = ref('')
 
 const hasConfig = computed(() => Boolean(form.webdavUrl))
 
@@ -282,13 +407,20 @@ const saveCheckKind = computed(() => {
   }
 })
 
+const rebuildKind = computed(() => {
+  if (!rebuildMessage.value) {
+    return 'info'
+  }
+  return rebuildMessage.value.includes('失败') ? 'error' : 'success'
+})
+
 onMounted(() => {
   loadAll()
 })
 
 async function loadAll() {
   error.value = ''
-  await Promise.all([loadStatus(), loadConfig()])
+  await Promise.all([loadStatus(), loadConfig(), loadReminderSettings()])
 }
 
 async function loadStatus() {
@@ -415,6 +547,72 @@ async function handleCheckBeforeSave() {
   }
 }
 
+async function loadReminderSettings() {
+  try {
+    const settings = await getSettings()
+    const map = new Map(settings.items.map((item) => [item.key, item.valueJson] as const))
+    const enabled = decodeSettingValue(map.get('reminder.enabled'))
+    reminderForm.enabled = enabled === null ? true : enabled === 'true'
+    reminderForm.windowHours = parseInt(decodeSettingValue(map.get('reminder.windowHours')) ?? '24', 10) || 24
+    reminderForm.intervalMinutes = parseInt(decodeSettingValue(map.get('sync.intervalMinutes')) ?? '15', 10) || 15
+  } catch (err) {
+    error.value = `读取提醒设置失败：${formatError(err)}`
+  }
+}
+
+async function handleSaveReminderSettings() {
+  isSavingReminder.value = true
+  error.value = ''
+  try {
+    await Promise.all([
+      setSetting({
+        key: 'reminder.enabled',
+        valueJson: encodeSettingValue(reminderForm.enabled ? 'true' : 'false'),
+      }),
+      setSetting({
+        key: 'reminder.windowHours',
+        valueJson: encodeSettingValue(String(reminderForm.windowHours)),
+      }),
+      setSetting({
+        key: 'sync.intervalMinutes',
+        valueJson: encodeSettingValue(String(reminderForm.intervalMinutes)),
+      }),
+    ])
+    rebuildMessage.value = '提醒设置已保存。'
+  } catch (err) {
+    rebuildMessage.value = `保存提醒设置失败：${formatError(err)}`
+  } finally {
+    isSavingReminder.value = false
+  }
+}
+
+async function handlePreviewReminders() {
+  isPreviewing.value = true
+  error.value = ''
+  try {
+    reminderPlan.value = await previewReminders()
+  } catch (err) {
+    error.value = `提醒预览失败：${formatError(err)}`
+  } finally {
+    isPreviewing.value = false
+  }
+}
+
+async function handleRebuildReminders() {
+  isRebuilding.value = true
+  error.value = ''
+  rebuildMessage.value = ''
+  try {
+    reminderPlan.value = await rebuildReminders()
+    const count = reminderPlan.value?.items.length ?? 0
+    rebuildMessage.value = `提醒已重建，共 ${count} 条待触发。`
+  } catch (err) {
+    rebuildMessage.value = `提醒重建失败：${formatError(err)}`
+  } finally {
+    isRebuilding.value = false
+  }
+}
+
 function formatTimestamp(value: string | null) {
   if (!value) {
     return '尚无记录'
@@ -429,7 +627,7 @@ function formatError(error: unknown) {
   return String(error)
 }
 
-defineExpose({ loadStatus, loadConfig, loadAll })
+defineExpose({ loadStatus, loadConfig, loadAll, loadReminderSettings })
 </script>
 
 <style scoped>
@@ -683,6 +881,71 @@ h3 {
   border: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.72);
   color: var(--color-text);
+}
+
+.field-block--check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.reminder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.reminder-item {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-raised);
+  font-size: 13px;
+}
+
+.reminder-time {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.reminder-kind {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.reminder-kind--danger {
+  background: #f7e8e3;
+  color: #8f4a3f;
+}
+
+.reminder-kind--due {
+  background: #f5edda;
+  color: #8a6b2a;
+}
+
+.reminder-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 640px) {

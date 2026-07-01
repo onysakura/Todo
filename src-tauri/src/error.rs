@@ -50,3 +50,17 @@ impl From<AppError> for CommandError {
         }
     }
 }
+
+impl From<crate::service::platform_service::PlatformError> for CommandError {
+    fn from(value: crate::service::platform_service::PlatformError) -> Self {
+        let code = match value {
+            crate::service::platform_service::PlatformError::NotSupported => "platform_not_supported",
+            crate::service::platform_service::PlatformError::PermissionDenied => "platform_permission_denied",
+            crate::service::platform_service::PlatformError::Platform(_) => "platform_error",
+        };
+        Self {
+            code,
+            message: value.to_string(),
+        }
+    }
+}

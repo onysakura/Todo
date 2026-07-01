@@ -269,4 +269,149 @@ describe('SyncView', () => {
     expect(wrapper.find('.status-pill--ok').exists()).toBe(true)
     expect(wrapper.text()).toContain('已同步')
   })
+
+  it('挂载后读取提醒设置并回填表单', async () => {
+    mockInvokeByCommand({
+      sync_status_get: createStatus(),
+      settings_get: createSettings([
+        { key: 'reminder.enabled', value: 'false' },
+        { key: 'reminder.windowHours', value: '48' },
+        { key: 'sync.intervalMinutes', value: '30' },
+      ]),
+    })
+
+    const wrapper = mount(SyncView)
+    await flushPromises()
+
+    const checkbox = wrapper.find('.reminder-card input[type="checkbox"]').element as HTMLInputElement
+    expect(checkbox.checked).toBe(false)
+    const numberInputs = wrapper.findAll('.reminder-card input[type="number"]')
+    expect((numberInputs[0].element as HTMLInputElement).value).toBe('48')
+    expect((numberInputs[1].element as HTMLInputElement).value).toBe('30')
+  })
+
+  it('点击保存提醒设置时写入三个键', async () => {
+    mockInvokeByCommand({
+      sync_status_get: createStatus(),
+      settings_get: createSettings(),
+      settings_set: { key: 'reminder.enabled', valueJson: '"true"', updatedAt: 't' },
+    })
+
+    const wrapper = mount(SyncView)
+    await flushPromises()
+
+    const saveButton = wrapper.findAll('.reminder-card .ghost-button').find((b) =>
+      b.text().includes('保存提醒设置'),
+    )
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    const calls = vi.mocked(invoke).mock.calls.filter((c) => c[0] === 'settings_set')
+    expect(calls).toHaveLength(3)
+    expect(calls[0][1]).toEqual({
+      input: { key: 'reminder.enabled', valueJson: '"true"' },
+    })
+    expect(calls[1][1]).toEqual({
+      input: { key: 'reminder.windowHours', valueJson: '"24"' },
+    })
+    expect(calls[2][1]).toEqual({
+      input: { key: 'sync.intervalMinutes', valueJson: '"15"' },
+    })
+    expect(wrapper.text()).toContain('提醒设置已保存')
+  })
+
+  it('点击刷新预览时调用 reminder_preview 并渲染提醒列表', async () => {
+    mockInvokeByCommand({
+      sync_status_get: createStatus(),
+      settings_get: createSettings(),
+      reminder_preview: {
+        items: [
+          {
+            seriesId: 's1',
+            occurrenceKey: '2026-07-02',
+            title: '整理周报',
+            triggerAt: '2026-07-02T09:00:00',
+            kind: 'danger',
+            payload: '周五前',
+          },
+          {
+            seriesId: 's2',
+            occurrenceKey: '2026-07-02',
+            title: '提交日报',
+            triggerAt: '2026-07-02T10:00:00',
+            kind: 'due',
+            payload: null,
+          },
+        ],
+        windowStart: '2026-07-01T10:00:00',
+        windowEnd: '2026-07-02T10:00:00',
+      },
+    })
+
+    const wrapper = mount(SyncView)
+    await flushPromises()
+
+    const refreshButton = wrapper.findAll('.preview-card .text-button').find((b) =>
+      b.text().includes('刷新预览'),
+    )
+    await refreshButton!.trigger('click')
+    await flushPromises()
+
+    expect(invoke).toHaveBeenCalledWith('reminder_preview', { windowHours: undefined })
+    expect(wrapper.findAll('.reminder-item')).toHaveLength(2)
+    expect(wrapper.text()).toContain('整理周报')
+    expect(wrapper.text()).toContain('提交日报')
+    expect(wrapper.find('.reminder-kind--danger').exists()).toBe(true)
+    expect(wrapper.find('.reminder-kind--due').exists()).toBe(true)
+  })
+
+  it('点击立即重建提醒时调用 reminder_rebuild 并显示结果', async () => {
+    mockInvokeByCommand({
+      sync_status_get: createStatus(),
+      settings_get: createSettings(),
+      reminder_rebuild: {
+        items: [
+          {
+            seriesId: 's1',
+            occurrenceKey: '2026-07-02',
+            title: '整理周报',
+            triggerAt: '2026-07-02T09:00:00',
+            kind: 'danger',
+            payload: null,
+          },
+        ],
+        windowStart: '2026-07-01T10:00:00',
+        windowEnd: '2026-07-02T10:00:00',
+      },
+    })
+
+    const wrapper = mount(SyncView)
+    await flushPromises()
+
+    const rebuildButton = wrapper.find('.preview-card .primary-button')
+    await rebuildButton.trigger('click')
+    await flushPromises()
+
+    expect(invoke).toHaveBeenCalledWith('reminder_rebuild')
+    expect(wrapper.text()).toContain('提醒已重建，共 1 条待触发')
+  })
+
+  it('提醒预览返回空列表时显示无提醒提示', async () => {
+    mockInvokeByCommand({
+      sync_status_get: createStatus(),
+      settings_get: createSettings(),
+      reminder_preview: { items: [], windowStart: '2026-07-01T10:00:00', windowEnd: '2026-07-02T10:00:00' },
+    })
+
+    const wrapper = mount(SyncView)
+    await flushPromises()
+
+    const refreshButton = wrapper.findAll('.preview-card .text-button').find((b) =>
+      b.text().includes('刷新预览'),
+    )
+    await refreshButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('近期无待触发提醒')
+  })
 })

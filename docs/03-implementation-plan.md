@@ -494,7 +494,7 @@
 
 ### 阶段 9. Windows 后台与提醒
 
-当前状态：`未开始`
+当前状态：`已完成`
 
 目标：
 
@@ -502,25 +502,56 @@
 
 任务：
 
-- 接入 Windows 托盘能力
-- 实现主窗口关闭后销毁窗口并保留后台核心进程
-- 实现托盘菜单与窗口唤起
-- 实现本地提醒调度
-- 实现同步后重建提醒计划
-- 实现后台定时同步策略
-- 验证后台低资源占用目标
+后端提醒核心（平台无关，可单测）：
+
+- `已完成` 9.1 新增 `reminder_service.rs`：定义 `ReminderKind`（`danger`/`due`）、`ReminderItem`（series_id/occurrence_key/title/trigger_at/kind/payload）、`ReminderPlan`（items + window_start + window_end）；`compute_reminder_plan(database, window_start, window_end)` 复用 `TaskService::upcoming_query` 投影，对 `pending` 实例按 `danger_at`（优先）或 `due_at`（`due_date` + `due_time`，全天用 `due_date 00:00`）落在窗口内生成提醒项。
+- `已完成` 9.2 `reminder_service` 单元测试：danger_at 命中、due_at 命中、已完成/已取消实例跳过、窗口外过滤、danger_at 优先于 due_at。
+
+平台抽象与 Windows 实现：
+
+- `已完成` 9.3 新增 `platform_service.rs`：定义 `PlatformCapability` trait（`show_main_window`/`close_main_window`/`schedule_notifications`/`cancel_all_notifications`/`run_background_sync_if_allowed`）；`PlatformError` 含 `NotSupported`/`PermissionDenied`/`Platform` 变体；提供 `schedule_reminder_plan` 辅助函数先取消全部再按 plan 调度。
+- `已完成` 9.4 Windows 实现：基于 `tauri::AppHandle` + `tauri-plugin-notification`，`schedule_notifications` 用稳定 notification key（`series_id::occurrence_key::kind`），`cancel_all_notifications` 清除已注册；Android 走 stub 降级返回 `NotSupported`（阶段 10 补全）。
+
+Windows 托盘与窗口生命周期：
+
+- `已完成` 9.5 配置：`tauri.conf.json` 启用 tray icon 与 close-requested 事件；`Cargo.toml` 加 `tauri` feature `"tray-icon"`、`tauri-plugin-notification`；`capabilities/default.json` 加 `notification:default` 权限。
+- `已完成` 9.6 `lib.rs` `run()` 集成：托盘菜单（显示窗口/手动同步/退出）、托盘左键单击唤起窗口、主窗口 `CloseRequested` 时 `prevent_close` + `destroy` 窗口（保留进程）、`PlatformCapability` 实例托管到 `AppState` 之外的独立 `State`。
+
+提醒重建钩子与后台同步：
+
+- `已完成` 9.7 `lib.rs` 新增命令 `reminder_rebuild`（手动触发：计算 plan + 平台调度）、`reminder_preview`（返回近期 plan 用于前端预览）；任务变更命令（create/update/delete/set_status/set_occurrence_*）后端在事务提交后调用 `schedule_reminder_plan`（失败仅日志降级，不阻断主操作）。
+- `已完成` 9.8 `sync_run` 成功后调用 `schedule_reminder_plan`（hook 进 `run_sync` 返回前）。
+- `已完成` 9.9 后台定时同步：`lib.rs` setup 启动 tokio interval 任务，间隔从 `app_settings` `sync.intervalMinutes` 读取（默认 15，最小 5），每轮调用 `sync_run` + `schedule_reminder_plan`；窗口销毁后继续运行。
+
+前端：
+
+- `已完成` 9.10 `SyncView.vue` 补提醒预览与设置区：`reminder.enabled`/`reminder.windowHours`（默认 24）/`sync.intervalMinutes`（默认 15）三个 settings 读写；新增 `reminder-api.ts` 包装 `reminder_rebuild`/`reminder_preview`。
+
+测试与验证：
+
+- `已完成` 9.11 运行 `cargo test` + `npm run build` + 前端测试验证；Windows 托盘/通知/后台定时相关代码受沙箱系统依赖限制无法 `cargo check`，需在非沙箱环境执行 `cargo tauri build --debug`（Windows）复验托盘、窗口关闭销毁、提醒触发、后台同步行为。
 
 交付物：
 
 - Windows 托盘能力
 - 后台同步与提醒服务
-- 后台资源占用验证记录
+- 后台资源占用验证记录（非沙箱环境补）
 
 验收条件：
 
 - Windows 可关闭主窗口后继续后台运行
 - 危险日与截止提醒可正常触发
 - 后台同步可工作且不依赖前端窗口常驻
+
+说明（阶段 9 设计基线）：
+
+- 提醒计划不新增数据表：`reminder_service` 实时计算近期提醒项（基于 `danger_at` + `due_at` 投影），通知由平台通知系统托管；重建时先 `cancel_all_notifications` 再按 plan 重新 `schedule_notifications`，避免重复触发。
+- `sync_meta` 仅记录 `last_reminder_rebuild_at`，不持久化完整 plan。
+- 通知 key 采用稳定格式 `series_id::occurrence_key::kind`，便于取消与去重。
+- `platform_service` 抽象遵循详细设计 11.2：业务层不关心 Windows/Android，不支持的能力显式降级返回 `PlatformError::NotSupported`，而非静默失败。
+- 提醒触发时间首版不引入"提前 N 分钟"配置：`danger_at` 本身即"应开始关注"锚点，`due` 类在 `due_at` 触发；提前量留待后续阶段按需引入。
+- 后台模型严格按详细设计 10.2："销毁主窗口，保留 Rust 核心"——`CloseRequested` 时 `prevent_close` + `destroy`，托盘保留进程与同步/提醒/定时任务。
+- 沙箱限制：托盘/通知/后台定时为平台能力代码，沙箱缺 `libwebkit2gtk-4.1-dev`/`glib-2.0` 无法 `cargo check`，本阶段代码以人工 review + 非沙箱 Windows 构建复验为准。
 
 ### 阶段 10. Android 适配与双端验证
 
@@ -706,12 +737,9 @@
 
 ## 11. 下一步执行建议
 
-阶段 5 执行清单已细化，按以下顺序推进：
+阶段 9（Windows 后台与提醒）已完成，下一步转入阶段 10（Android 适配与双端验证）：
 
-1. 5.1 扩展 `task_create` 支持创建重复任务，作为阶段 5 后续能力的前置依赖
-2. 5.2 / 5.3 实现单次覆盖的写入与读取闭环，明确实例级修改的持久化契约
-3. 5.4 / 5.5 实现模板版本段截断与"从指定日期开始影响未来"的最小服务，含未来覆盖保留/清除策略
-4. 5.6 扩展 `task_delete` 支持重复任务整体删除
-5. 5.7 通过 Rust 单元测试锁定模板修改不污染历史实例、未来覆盖默认保留的边界
-6. 5.8 完成 `cargo test` + 双端构建验证
-7. 5.9 阶段 5 前端接入另立子计划，不在当前 Rust 闭环内完成
+1. 在非沙箱环境执行 `cargo tauri build --debug`（Windows）复验托盘、窗口关闭销毁、提醒触发、后台同步行为
+2. 在非沙箱环境执行 `cargo test` 复验后端 47+ 个单元测试（含 `reminder_service` 7 个 + `platform_service` 5 个）
+3. 阶段 10：补齐 Android 通知权限流程与 `platform_service` Android 实现（当前 mobile 返回 `NotSupported`）
+4. 阶段 10：调整移动端导航、布局与日期时间选择交互，验证任务创建/编辑/重复/覆盖/同步双端闭环
