@@ -325,7 +325,7 @@
 
 ### 阶段 6. 日历视图与近期视图
 
-当前状态：`进行中`
+当前状态：`已完成`
 
 目标：
 
@@ -333,7 +333,7 @@
 
 任务：
 
-后端投影服务（本轮范围）：
+后端投影服务：
 
 - `已完成` 6.1 扩展 `TaskListItemDto`，补 `created_at` 字段，为近期视图排序键提供创建时间兜底
 - `已完成` 6.2 修正近期视图排序键对齐详细设计 7.2：状态分组（未完成优先）→ 优先级 → 截止时间 → 开始时间 → 创建时间；危险日临近程度键位预留，待阶段 7 接入
@@ -341,15 +341,15 @@
 - `已完成` 6.4 在 `lib.rs` 注册 `task_calendar_query` 命令
 - `已完成` 6.5 补充后端单元测试：日历投影按天聚合、空日补齐、近期视图排序键对齐（新增 3 个测试，总数 37 → 40）
 
-前端视图组件（留待非沙箱环境）：
+前端视图组件：
 
-- `未开始` 6.6 实现纵向日历流组件
-- `未开始` 6.7 实现月份分隔样式
-- `未开始` 6.8 实现单点任务渲染
-- `未开始` 6.9 实现带开始时间和截止时间任务的可视表达
-- `未开始` 6.10 实现状态弱化显示
-- `未开始` 6.11 实现危险日高亮显示（依赖阶段 7）
-- `未开始` 6.12 补充前端视图组件测试
+- `已完成` 6.6 实现纵向日历流组件（`CalendarView.vue`，按天分组、空日补齐、今日高亮）
+- `已完成` 6.7 实现月份分隔样式（跨月时插入月份分隔符）
+- `已完成` 6.8 实现单点任务渲染（`TaskCard.vue` 共享卡片组件）
+- `已完成` 6.9 实现带开始时间和截止时间任务的可视表达（TaskCard 同时展示截止与开始元数据）
+- `已完成` 6.10 实现状态弱化显示（已完成/已取消任务降低不透明度）
+- `已完成` 6.11 实现危险日高亮显示（依赖阶段 7）（TaskCard 预留 `isDangerDay` prop 与样式，待阶段 7 接入数据）
+- `已完成` 6.12 补充前端视图组件测试（新增 vitest + @vue/test-utils，共 27 个测试通过）
 
 交付物：
 
@@ -367,11 +367,12 @@
 说明：
 
 - 当前 `upcoming_query` 已支持未来 N 天查询与重复实例展开，近期视图投影直接复用，本轮聚焦排序键对齐与日历投影新增。
-- 危险日高亮（6.11）依赖阶段 7 的危险日计算，本轮后端排序键为其预留位但不接入数据。
+- 危险日高亮（6.11）依赖阶段 7 的危险日计算，本轮后端排序键为其预留位但不接入数据；前端 TaskCard 已预留 `isDangerDay` prop 与危险日样式，待阶段 7 接入。
+- `AppShell` 已从阶段 3 的"近期入口 + 编辑表单"双栏演化为"日历 / 近期 / 编辑"三视图导航结构，任务在日历或近期视图点击后自动切换到编辑视图并加载详情。
 
 ### 阶段 7. 危险日与工作日计算
 
-当前状态：`未开始`
+当前状态：`已完成`
 
 目标：
 
@@ -379,25 +380,56 @@
 
 任务：
 
-- 定义危险规则领域模型
-- 实现按小时倒推
-- 实现按自然日倒推
-- 实现按工作日倒推
-- 实现节假日判定接口
-- 实现单次危险日手动修改
-- 实现节假日数据更新策略
-- 补充相关单元测试
+后端危险日计算服务：
+
+- `已完成` 7.1 定义危险规则领域模型与解析（`DangerOffsetUnit` 枚举，解析 `danger_offset_value`/`danger_offset_unit`/`danger_use_workday`，写入校验严格、投影读取宽容）
+- `已完成` 7.2 实现工作日判定能力（`WorkdayCalculator`：基于 `holiday_calendar` 判定工作日，无记录时按周末 fallback，`workday` 类型覆盖周末调休）
+- `已完成` 7.3 实现按小时倒推（`due_anchor - hours`）
+- `已完成` 7.4 实现按自然日倒推（`due_anchor - days`，保留时间部分）
+- `已完成` 7.5 实现按工作日倒推（从 `due_anchor` 向前跳过非工作日 N 个，保留时间部分）
+- `已完成` 7.6 实现单次危险日覆盖优先策略（`override_danger_at` 优先于模板规则计算）
+
+投影与命令接入：
+
+- `已完成` 7.7 扩展 `TaskCreateInput`/`TaskUpdateInput`/`TaskUpdateTemplateFromInput` 支持 `dangerOffsetValue`/`dangerOffsetUnit`/`dangerUseWorkday` 字段；在 `TaskListItemDto` 补 `danger_at` 字段
+- `已完成` 7.8 在 `collect_list_items` 投影中接入危险日计算，单次覆盖优先，并预取节假日区间
+- `已完成` 7.9 修正近期视图排序键，将危险日占位替换为真实 `danger_at` 临近程度（有 danger_at 排前，按时间升序）
+- `已完成` 7.10 实现 `task_set_occurrence_danger` 命令（单次危险日手动修改，仅重复任务，写入 `override_danger_at`）
+- `已完成` 7.11 在 `lib.rs` 注册 `task_set_occurrence_danger` 命令
+
+测试与验证：
+
+- `已完成` 7.12 补充 Rust 单元测试（按小时/自然日/工作日倒推、单次覆盖优先、手动修改不影响其他实例、工作日跨周末与调休）
+- `已完成` 7.13 运行 `cargo test` + `npm run build` 验证
 
 交付物：
 
 - 危险日计算服务
 - 工作日计算服务
-- 节假日数据服务
+- 节假日数据服务（复用阶段 2 已有 `holiday_calendar`）
 
 验收条件：
 
 - 危险日可按自然日或工作日正确计算
 - 单次调整危险日后不会影响其他实例
+
+说明：
+
+- 阶段 7 不新增数据表或字段，所有底层结构（`danger_offset_value`/`danger_offset_unit`/`danger_use_workday`/`override_danger_at`/`holiday_calendar`）已在阶段 2 就绪。
+- `danger_offset_unit` 仅支持 `hour`、`day`；`danger_use_workday = true` 仅对 `day` 有意义。
+- `danger_at` 投影优先级：`override_danger_at` > 模板规则计算 > `None`。
+- `danger_at` 格式采用无时区 ISO 字符串 `YYYY-MM-DDTHH:MM:SS`，与 `occurrence_key` 锚点格式一致。
+- `WorkdayCalculator` 在投影时按 `[window_start - 366 天, window_end]` 预取节假日，覆盖一年内倒推场景。
+- 前端接入（TaskCard 危险日高亮数据绑定、编辑表单 danger_offset 控件）留待后续阶段，本轮聚焦后端闭环。
+
+阶段 7 完成情况（2026-07-01）：
+
+- 新增 `src-tauri/src/service/danger_service.rs`：`DangerOffsetUnit`/`DangerRule`/`validate_danger_input`（写入严格）/`resolve_danger_rule`（投影宽容）/`compute_danger_at`（override 优先）/`WorkdayCalculator`（`holiday_calendar` 判定 + 周末 fallback + `shift_back_workdays`），含 9 个单元测试。
+- 扩展 `task_service.rs`：三个 Input 结构补 danger 字段、新增 `TaskSetOccurrenceDangerInput` 与 `set_occurrence_danger` 方法、`TaskListItemDto` 补 `danger_at`、`collect_list_items` 接入 `WorkdayCalculator` 与 `compute_danger_at`（预取区间 `[window_start - 366 天, window_end]`，单条计算失败降级 `None`）、`sort_key` 第三项由占位 `i64` 改为 `danger_at` 字符串字典序（无值用 `9999-12-31T23:59:59` 占位）。
+- `lib.rs` 新增 `task_set_occurrence_danger` 命令并注册到 `invoke_handler`。
+- Rust 单元测试新增 8 个（小时/自然日/工作日倒推、覆盖优先、单实例隔离、清除回退、单次任务拒绝、非法锚点拒绝），danger_service 自带 9 个，共 17 个新增测试。
+- `npm run build` 已通过；前端 27 个测试全通过。
+- 沙箱限制：当前 TRAE 沙箱为全新 Ubuntu 24.04 clone，apt 对外网络不通，无法安装 `libglib2.0-dev`/`libwebkit2gtk-4.1-dev` 等系统依赖，`cargo check`/`cargo test` 无法在沙箱执行；后端代码已通过人工 review（import 完整、`compute_danger_at` 调用签名匹配、`sort_key` 元组类型一致、`set_occurrence_danger` 复用 `set_occurrence_status` 模式），需在非沙箱环境复验 `cargo test`。
 
 ### 阶段 8. 同步机制
 

@@ -17,6 +17,9 @@ use crate::{
         task_series_repository::TaskSeriesRepository,
         task_series_revision_repository::TaskSeriesRevisionRepository,
     },
+    service::danger_service::{
+        compute_danger_at, resolve_danger_rule, validate_danger_input, WorkdayCalculator,
+    },
 };
 
 const STATUS_PENDING: &str = "pending";
@@ -49,6 +52,10 @@ pub struct TaskCreateInput {
     pub recurrence_type: Option<String>,
     pub recurrence_interval: Option<i64>,
     pub recurrence_until: Option<String>,
+    pub danger_offset_value: Option<i64>,
+    pub danger_offset_unit: Option<String>,
+    #[serde(default)]
+    pub danger_use_workday: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -64,6 +71,10 @@ pub struct TaskUpdateInput {
     pub start_time: Option<String>,
     pub due_date: String,
     pub due_time: Option<String>,
+    pub danger_offset_value: Option<i64>,
+    pub danger_offset_unit: Option<String>,
+    #[serde(default)]
+    pub danger_use_workday: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -99,6 +110,20 @@ pub struct TaskUpdateTemplateFromInput {
     pub recurrence_interval: Option<i64>,
     pub recurrence_until: Option<String>,
     pub clear_future_overrides: bool,
+    pub danger_offset_value: Option<i64>,
+    pub danger_offset_unit: Option<String>,
+    #[serde(default)]
+    pub danger_use_workday: bool,
+}
+
+/// 单次危险日手动修改输入。
+/// `danger_at = None` 表示清除该实例的单次危险日覆盖，回退到模板规则计算。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSetOccurrenceDangerInput {
+    pub series_id: String,
+    pub occurrence_key: String,
+    pub danger_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -164,6 +189,7 @@ pub struct TaskListItemDto {
     pub due_time: Option<String>,
     pub status: String,
     pub created_at: String,
+    pub danger_at: Option<String>,
 }
 
 /// 日历视图单日投影：该日期下挂的所有任务实例（可能为空，空日用于前端连续渲染）。
@@ -187,6 +213,9 @@ struct ParsedTaskInput {
     due_time: Option<Time>,
     duration_seconds: Option<i64>,
     recurrence: Option<ParsedRecurrence>,
+    danger_offset_value: Option<i64>,
+    danger_offset_unit: Option<String>,
+    danger_use_workday: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -281,9 +310,9 @@ impl TaskService {
                 recurrence_interval,
                 recurrence_rule_json: None,
                 recurrence_until,
-                danger_offset_value: None,
-                danger_offset_unit: None,
-                danger_use_workday: false,
+                danger_offset_value: parsed.danger_offset_value,
+                danger_offset_unit: parsed.danger_offset_unit,
+                danger_use_workday: parsed.danger_use_workday,
                 created_at: now.clone(),
                 updated_at: now.clone(),
             };
@@ -415,6 +444,9 @@ impl TaskService {
             recurrence_type: None,
             recurrence_interval: None,
             recurrence_until: None,
+            danger_offset_value: input.danger_offset_value,
+            danger_offset_unit: input.danger_offset_unit,
+            danger_use_workday: input.danger_use_workday,
         })?;
         let now = now_rfc3339()?;
 
@@ -457,6 +489,9 @@ impl TaskService {
             revision.start_at_time_part = parsed.start_time.map(time_to_seconds);
             revision.due_at_time_part = parsed.due_time.map(time_to_seconds);
             revision.duration_seconds = parsed.duration_seconds;
+            revision.danger_offset_value = parsed.danger_offset_value;
+            revision.danger_offset_unit = parsed.danger_offset_unit;
+            revision.danger_use_workday = parsed.danger_use_workday;
             revision.updated_at = now.clone();
             TaskSeriesRevisionRepository::update(transaction, &revision)?;
             TaskSeriesRepository::touch_updated_at(transaction, &input.series_id, &now)?;
@@ -677,6 +712,109 @@ impl TaskService {
         })
     }
 
+    /// 单次危险日手动修改：写入或清除某次实例的 `override_danger_at`。
+    /// 仅重复任务支持；`danger_at = None` 表示清除覆盖，回退到模板规则计算。
+    pub fn set_occurrence_danger(
+        database: &Database,
+        input: TaskSetOccurrenceDangerInput,
+    ) -> AppResult<TaskDetailDto> {
+        let occurrence_key = input.occurrence_key.trim().to_string();
+        if occurrence_key.is_empty() {
+            return Err(AppError::Validation("occurrence_key 不能为空".to_string()));
+        }
+        let normalized_danger = input
+            .danger_at
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        if let Some(value) = normalized_danger.as_deref() {
+            crate::service::danger_service::parse_danger_anchor(value)?;
+        }
+        let now = now_rfc3339()?;
+
+        database.with_transaction(|transaction| {
+            let series = TaskSeriesRepository::get_by_id(transaction, &input.series_id)?
+                .ok_or_else(|| AppError::Validation("任务不存在".to_string()))?;
+            if series.kind != TASK_KIND_RECURRING {
+                return Err(AppError::Validation(
+                    "单次任务不支持单次危险日覆盖，请使用 task_update 修改模板".to_string(),
+                ));
+            }
+
+            let (revision_id, _start_anchor, _due_anchor) = parse_occurrence_key(&occurrence_key)?;
+            let revisions =
+                TaskSeriesRevisionRepository::list_by_series_id(transaction, &input.series_id)?;
+            let revision = revisions
+                .into_iter()
+                .find(|item| item.id == revision_id)
+                .ok_or_else(|| {
+                    AppError::Validation("occurrence_key 对应的版本段不存在".to_string())
+                })?
+                .clone();
+
+            let existing_override = TaskOccurrenceOverrideRepository::get_by_series_and_occurrence(
+                transaction,
+                &input.series_id,
+                &occurrence_key,
+            )?;
+            let created_at = existing_override
+                .as_ref()
+                .map(|value| value.created_at.clone())
+                .unwrap_or_else(|| now.clone());
+            let override_id = existing_override
+                .as_ref()
+                .map(|value| value.id.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+            let override_record = TaskOccurrenceOverride {
+                id: override_id,
+                series_id: input.series_id.clone(),
+                occurrence_key: occurrence_key.clone(),
+                override_start_at: existing_override
+                    .as_ref()
+                    .and_then(|value| value.override_start_at.clone()),
+                override_due_at: existing_override
+                    .as_ref()
+                    .and_then(|value| value.override_due_at.clone()),
+                override_danger_at: normalized_danger,
+                override_title: existing_override
+                    .as_ref()
+                    .and_then(|value| value.override_title.clone()),
+                override_note: existing_override
+                    .as_ref()
+                    .and_then(|value| value.override_note.clone()),
+                override_tag_id: existing_override
+                    .as_ref()
+                    .and_then(|value| value.override_tag_id.clone()),
+                override_priority: existing_override
+                    .as_ref()
+                    .and_then(|value| value.override_priority),
+                status: existing_override
+                    .as_ref()
+                    .map(|value| value.status.clone())
+                    .unwrap_or_else(|| STATUS_PENDING.to_string()),
+                completed_at: existing_override
+                    .as_ref()
+                    .and_then(|value| value.completed_at.clone()),
+                cancelled_at: existing_override
+                    .as_ref()
+                    .and_then(|value| value.cancelled_at.clone()),
+                detached_as_single: existing_override
+                    .as_ref()
+                    .map(|value| value.detached_as_single)
+                    .unwrap_or(false),
+                created_at,
+                updated_at: now.clone(),
+            };
+
+            TaskOccurrenceOverrideRepository::upsert(transaction, &override_record)?;
+            TaskSeriesRepository::touch_updated_at(transaction, &input.series_id, &now)?;
+
+            Self::build_occurrence_detail(transaction, series, revision, occurrence_key)
+        })
+    }
+
     pub fn update_template_from(
         database: &Database,
         input: TaskUpdateTemplateFromInput,
@@ -694,6 +832,9 @@ impl TaskService {
             recurrence_type: input.recurrence_type,
             recurrence_interval: input.recurrence_interval,
             recurrence_until: input.recurrence_until,
+            danger_offset_value: input.danger_offset_value,
+            danger_offset_unit: input.danger_offset_unit,
+            danger_use_workday: input.danger_use_workday,
         })?;
         let new_effective_from = parse_date(&input.effective_from, "新版本段生效日期")?;
         let now = now_rfc3339()?;
@@ -774,9 +915,9 @@ impl TaskService {
                 recurrence_interval,
                 recurrence_rule_json: None,
                 recurrence_until,
-                danger_offset_value: None,
-                danger_offset_unit: None,
-                danger_use_workday: false,
+                danger_offset_value: parsed.danger_offset_value,
+                danger_offset_unit: parsed.danger_offset_unit,
+                danger_use_workday: parsed.danger_use_workday,
                 created_at: now.clone(),
                 updated_at: now.clone(),
             };
@@ -930,6 +1071,12 @@ impl TaskService {
             input.recurrence_until,
         )?;
 
+        validate_danger_input(
+            input.danger_offset_value,
+            input.danger_offset_unit.clone(),
+            input.danger_use_workday,
+        )?;
+
         Ok(ParsedTaskInput {
             title,
             note: normalize_optional_text(input.note),
@@ -942,6 +1089,9 @@ impl TaskService {
             due_time,
             duration_seconds,
             recurrence,
+            danger_offset_value: input.danger_offset_value,
+            danger_offset_unit: input.danger_offset_unit,
+            danger_use_workday: input.danger_use_workday,
         })
     }
 
@@ -1171,6 +1321,7 @@ fn build_task_list_item(
     revision: &TaskSeriesRevision,
     occurrence: ScheduledOccurrence,
     occurrence_override: Option<&TaskOccurrenceOverride>,
+    danger_at: Option<String>,
 ) -> TaskListItemDto {
     TaskListItemDto {
         series_id: series.id.clone(),
@@ -1197,6 +1348,7 @@ fn build_task_list_item(
             .map(|value| value.status.clone())
             .unwrap_or_else(|| STATUS_PENDING.to_string()),
         created_at: series.created_at.clone(),
+        danger_at,
     }
 }
 
@@ -1712,6 +1864,12 @@ fn collect_list_items(
     start_date: Date,
     end_date: Date,
 ) -> AppResult<Vec<TaskListItemDto>> {
+    // 危险日按工作日倒推时可能跨越多个周末与节假日，预取区间向前预留 366 天，
+    // 保证 WorkdayCalculator 在最坏情况下也能覆盖整个倒推路径。
+    let workday_range_start = start_date - Duration::days(366);
+    let workday_calculator =
+        WorkdayCalculator::load(connection, workday_range_start, end_date)?;
+
     let series_list = TaskSeriesRepository::list_active(connection)?;
     let mut items = Vec::new();
 
@@ -1729,6 +1887,7 @@ fn collect_list_items(
             .collect();
 
         for revision in revisions {
+            let danger_rule = resolve_danger_rule(&revision);
             let occurrences = expand_occurrences_for_revision(
                 &series.kind,
                 &revision,
@@ -1738,11 +1897,22 @@ fn collect_list_items(
 
             for occurrence in occurrences {
                 let occurrence_override = override_map.get(&occurrence.occurrence_key);
+                let override_danger_at = occurrence_override
+                    .and_then(|value| value.override_danger_at.as_deref());
+                // 单条实例的危险日计算失败不应拖垮整个投影，降级为 None。
+                let danger_at = compute_danger_at(
+                    occurrence.due_anchor_value,
+                    danger_rule.as_ref(),
+                    override_danger_at,
+                    &workday_calculator,
+                )
+                .unwrap_or(None);
                 items.push(build_task_list_item(
                     &series,
                     &revision,
                     occurrence,
                     occurrence_override,
+                    danger_at,
                 ));
             }
         }
@@ -1752,14 +1922,18 @@ fn collect_list_items(
 }
 
 // 排序键对齐详细设计 7.2：状态分组 → 优先级 → 危险日临近程度 → 截止时间 → 开始时间 → 创建时间。
-// 危险日临近程度依赖阶段 7，本轮统一占位 0，键位保留待接入。
-fn sort_key(task: &TaskListItemDto) -> (u8, i64, i64, String, String, String) {
+// 危险日临近程度用 `danger_at` 字符串字典序（与时间序一致）升序排列；
+// 无危险日的实例用远期占位，排在该组最后。
+fn sort_key(task: &TaskListItemDto) -> (u8, i64, String, String, String, String) {
     let status_group: u8 = if task.status == STATUS_PENDING {
         0
     } else {
         1
     };
-    let danger_proximity: i64 = 0;
+    let danger_proximity = task
+        .danger_at
+        .clone()
+        .unwrap_or_else(|| "9999-12-31T23:59:59".to_string());
     (
         status_group,
         task.priority.unwrap_or(999),
@@ -1786,9 +1960,9 @@ mod tests {
 
     use super::{
         build_schedule_seed, build_scheduled_occurrence, parse_occurrence_key,
-        shift_recurrence_start, TaskCreateInput, TaskService, TaskSetOccurrenceStatusInput,
-        TaskSetStatusInput, TaskUpdateInput, TaskUpdateTemplateFromInput, UpcomingQueryInput,
-        TASK_KIND_RECURRING,
+        shift_recurrence_start, TaskCreateInput, TaskService, TaskSetOccurrenceDangerInput,
+        TaskSetOccurrenceStatusInput, TaskSetStatusInput, TaskUpdateInput,
+        TaskUpdateTemplateFromInput, UpcomingQueryInput, TASK_KIND_RECURRING,
     };
     use crate::{
         db::{now_rfc3339, Database},
@@ -1899,6 +2073,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task");
@@ -1937,6 +2114,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         );
 
@@ -1969,6 +2149,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task");
@@ -1999,6 +2182,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task");
@@ -2016,6 +2202,9 @@ mod tests {
                 start_time: Some("09:30".to_string()),
                 due_date: "2026-04-15".to_string(),
                 due_time: Some("20:15".to_string()),
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should update task");
@@ -2048,6 +2237,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task");
@@ -2096,6 +2288,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task");
@@ -2128,6 +2323,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task 1");
@@ -2147,6 +2345,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task 2");
@@ -2166,6 +2367,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task 3");
@@ -2205,6 +2409,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task");
@@ -2245,6 +2452,9 @@ mod tests {
                 recurrence_type: Some("week".to_string()),
                 recurrence_interval: Some(1),
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create recurring task");
@@ -2289,6 +2499,9 @@ mod tests {
                 recurrence_type: Some("fortnight".to_string()),
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         );
         assert!(invalid_type.is_err());
@@ -2308,6 +2521,9 @@ mod tests {
                 recurrence_type: Some("day".to_string()),
                 recurrence_interval: Some(0),
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         );
         assert!(invalid_interval.is_err());
@@ -2327,6 +2543,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: Some("2026-05-01".to_string()),
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         );
         assert!(orphan_until.is_err());
@@ -2353,6 +2572,9 @@ mod tests {
                 recurrence_type: Some("day".to_string()),
                 recurrence_interval: Some(1),
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create recurring task");
@@ -2420,6 +2642,9 @@ mod tests {
                 recurrence_type: Some("week".to_string()),
                 recurrence_interval: Some(1),
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create recurring task");
@@ -2469,6 +2694,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create single task");
@@ -2523,6 +2751,9 @@ mod tests {
                 recurrence_type: Some("week".to_string()),
                 recurrence_interval: Some(1),
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create recurring task");
@@ -2586,6 +2817,9 @@ mod tests {
                 recurrence_type: Some("day".to_string()),
                 recurrence_interval: Some(1),
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create recurring task");
@@ -2643,6 +2877,9 @@ mod tests {
                 recurrence_type: Some("week".to_string()),
                 recurrence_interval: Some(1),
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create recurring task");
@@ -2665,6 +2902,9 @@ mod tests {
                 recurrence_interval: Some(1),
                 recurrence_until: None,
                 clear_future_overrides: false,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should update template from");
@@ -2721,6 +2961,9 @@ mod tests {
                 recurrence_type: Some("day".to_string()),
                 recurrence_interval: Some(1),
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create recurring task");
@@ -2762,6 +3005,9 @@ mod tests {
                 recurrence_interval: Some(1),
                 recurrence_until: None,
                 clear_future_overrides: false,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should update template from");
@@ -2797,6 +3043,9 @@ mod tests {
                 recurrence_type: Some("day".to_string()),
                 recurrence_interval: Some(1),
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create recurring task");
@@ -2838,6 +3087,9 @@ mod tests {
                 recurrence_interval: Some(1),
                 recurrence_until: None,
                 clear_future_overrides: true,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should update template from");
@@ -3045,6 +3297,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task A");
@@ -3063,6 +3318,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task B");
@@ -3081,6 +3339,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create task C");
@@ -3152,6 +3413,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create completed task");
@@ -3180,6 +3444,9 @@ mod tests {
                 recurrence_type: None,
                 recurrence_interval: None,
                 recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
             },
         )
         .expect("should create pending task");
@@ -3199,5 +3466,425 @@ mod tests {
         assert_eq!(tasks[0].status, "pending");
         assert_eq!(tasks[1].title, "已完成");
         assert_eq!(tasks[1].status, "completed");
+    }
+
+    #[test]
+    fn upcoming_query_projects_danger_at_by_hour_offset() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "小时倒推".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(2),
+                all_day: false,
+                start_date: Some("2026-04-14".to_string()),
+                start_time: Some("12:00".to_string()),
+                due_date: "2026-04-14".to_string(),
+                due_time: Some("18:00".to_string()),
+                recurrence_type: None,
+                recurrence_interval: None,
+                recurrence_until: None,
+                danger_offset_value: Some(6),
+                danger_offset_unit: Some("hour".to_string()),
+                danger_use_workday: false,
+            },
+        )
+        .expect("should create task with hour danger offset");
+
+        let tasks = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-14".to_string()),
+                day_count: Some(1),
+            },
+        )
+        .expect("should query upcoming");
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].danger_at.as_deref(), Some("2026-04-14T12:00:00"));
+    }
+
+    #[test]
+    fn upcoming_query_projects_danger_at_by_calendar_day_offset() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "自然日倒推".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(2),
+                all_day: false,
+                start_date: Some("2026-04-14".to_string()),
+                start_time: Some("18:30".to_string()),
+                due_date: "2026-04-14".to_string(),
+                due_time: Some("18:30".to_string()),
+                recurrence_type: None,
+                recurrence_interval: None,
+                recurrence_until: None,
+                danger_offset_value: Some(2),
+                danger_offset_unit: Some("day".to_string()),
+                danger_use_workday: false,
+            },
+        )
+        .expect("should create task with day danger offset");
+
+        let tasks = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-14".to_string()),
+                day_count: Some(1),
+            },
+        )
+        .expect("should query upcoming");
+
+        assert_eq!(tasks.len(), 1);
+        // 自然日倒推保留时间部分
+        assert_eq!(tasks[0].danger_at.as_deref(), Some("2026-04-12T18:30:00"));
+    }
+
+    #[test]
+    fn upcoming_query_projects_danger_at_by_workday_offset_skips_weekend() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        // due=2026-04-13(周一) 18:00，倒推 1 工作日 → 2026-04-10(周五) 18:00
+        TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "工作日倒推".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(2),
+                all_day: false,
+                start_date: Some("2026-04-13".to_string()),
+                start_time: Some("18:00".to_string()),
+                due_date: "2026-04-13".to_string(),
+                due_time: Some("18:00".to_string()),
+                recurrence_type: None,
+                recurrence_interval: None,
+                recurrence_until: None,
+                danger_offset_value: Some(1),
+                danger_offset_unit: Some("day".to_string()),
+                danger_use_workday: true,
+            },
+        )
+        .expect("should create task with workday danger offset");
+
+        let tasks = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-13".to_string()),
+                day_count: Some(1),
+            },
+        )
+        .expect("should query upcoming");
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].danger_at.as_deref(), Some("2026-04-10T18:00:00"));
+    }
+
+    #[test]
+    fn set_occurrence_danger_override_takes_precedence_over_template_rule() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        let created = TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "每日提醒".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(2),
+                all_day: false,
+                start_date: Some("2026-04-13".to_string()),
+                start_time: Some("09:00".to_string()),
+                due_date: "2026-04-13".to_string(),
+                due_time: Some("09:00".to_string()),
+                recurrence_type: Some("day".to_string()),
+                recurrence_interval: Some(1),
+                recurrence_until: None,
+                danger_offset_value: Some(1),
+                danger_offset_unit: Some("day".to_string()),
+                danger_use_workday: false,
+            },
+        )
+        .expect("should create recurring task with danger rule");
+
+        let tasks = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-13".to_string()),
+                day_count: Some(2),
+            },
+        )
+        .expect("should query before override");
+        // 模板规则：due 2026-04-13 09:00 - 1 day = 2026-04-12T09:00:00
+        assert_eq!(tasks[0].danger_at.as_deref(), Some("2026-04-12T09:00:00"));
+
+        let target_key = tasks[0].occurrence_key.clone();
+        TaskService::set_occurrence_danger(
+            &database,
+            TaskSetOccurrenceDangerInput {
+                series_id: created.series_id.clone(),
+                occurrence_key: target_key.clone(),
+                danger_at: Some("2026-04-10T08:00:00".to_string()),
+            },
+        )
+        .expect("should set occurrence danger override");
+
+        let after = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-13".to_string()),
+                day_count: Some(2),
+            },
+        )
+        .expect("should query after override");
+        let overridden = after
+            .iter()
+            .find(|item| item.occurrence_key == target_key)
+            .expect("overridden occurrence should exist");
+        // 覆盖值优先于模板规则
+        assert_eq!(overridden.danger_at.as_deref(), Some("2026-04-10T08:00:00"));
+    }
+
+    #[test]
+    fn set_occurrence_danger_isolates_single_instance() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        let created = TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "每日打卡".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(2),
+                all_day: false,
+                start_date: Some("2026-04-13".to_string()),
+                start_time: Some("09:00".to_string()),
+                due_date: "2026-04-13".to_string(),
+                due_time: Some("09:00".to_string()),
+                recurrence_type: Some("day".to_string()),
+                recurrence_interval: Some(1),
+                recurrence_until: None,
+                danger_offset_value: Some(1),
+                danger_offset_unit: Some("day".to_string()),
+                danger_use_workday: false,
+            },
+        )
+        .expect("should create recurring task with danger rule");
+
+        let tasks = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-13".to_string()),
+                day_count: Some(3),
+            },
+        )
+        .expect("should query before override");
+        assert_eq!(tasks.len(), 3);
+
+        let target_key = tasks[1].occurrence_key.clone();
+        TaskService::set_occurrence_danger(
+            &database,
+            TaskSetOccurrenceDangerInput {
+                series_id: created.series_id.clone(),
+                occurrence_key: target_key.clone(),
+                danger_at: Some("2026-04-11T08:00:00".to_string()),
+            },
+        )
+        .expect("should set occurrence danger override");
+
+        let after = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-13".to_string()),
+                day_count: Some(3),
+            },
+        )
+        .expect("should query after override");
+
+        // 被覆盖的实例采用 override 值
+        let overridden = after
+            .iter()
+            .find(|item| item.occurrence_key == target_key)
+            .expect("overridden occurrence should exist");
+        assert_eq!(overridden.danger_at.as_deref(), Some("2026-04-11T08:00:00"));
+
+        // 其他实例仍按模板规则计算
+        let others: Vec<Option<&str>> = after
+            .iter()
+            .filter(|item| item.occurrence_key != target_key)
+            .map(|item| item.danger_at.as_deref())
+            .collect();
+        assert_eq!(
+            others,
+            vec![Some("2026-04-12T09:00:00"), Some("2026-04-13T09:00:00")]
+        );
+    }
+
+    #[test]
+    fn set_occurrence_danger_clear_returns_to_template_rule() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        let created = TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "每日复核".to_string(),
+                note: None,
+                tag_id: None,
+                priority: Some(2),
+                all_day: false,
+                start_date: Some("2026-04-13".to_string()),
+                start_time: Some("09:00".to_string()),
+                due_date: "2026-04-13".to_string(),
+                due_time: Some("09:00".to_string()),
+                recurrence_type: Some("day".to_string()),
+                recurrence_interval: Some(1),
+                recurrence_until: None,
+                danger_offset_value: Some(1),
+                danger_offset_unit: Some("day".to_string()),
+                danger_use_workday: false,
+            },
+        )
+        .expect("should create recurring task with danger rule");
+
+        let tasks = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-13".to_string()),
+                day_count: Some(1),
+            },
+        )
+        .expect("should query before override");
+        let target_key = tasks[0].occurrence_key.clone();
+
+        TaskService::set_occurrence_danger(
+            &database,
+            TaskSetOccurrenceDangerInput {
+                series_id: created.series_id.clone(),
+                occurrence_key: target_key.clone(),
+                danger_at: Some("2026-04-10T08:00:00".to_string()),
+            },
+        )
+        .expect("should set occurrence danger override");
+
+        // 清除覆盖，回退到模板规则
+        TaskService::set_occurrence_danger(
+            &database,
+            TaskSetOccurrenceDangerInput {
+                series_id: created.series_id.clone(),
+                occurrence_key: target_key.clone(),
+                danger_at: None,
+            },
+        )
+        .expect("should clear occurrence danger override");
+
+        let after = TaskService::upcoming_query(
+            &database,
+            UpcomingQueryInput {
+                start_date: Some("2026-04-13".to_string()),
+                day_count: Some(1),
+            },
+        )
+        .expect("should query after clear");
+        let cleared = after
+            .iter()
+            .find(|item| item.occurrence_key == target_key)
+            .expect("cleared occurrence should exist");
+        assert_eq!(cleared.danger_at.as_deref(), Some("2026-04-12T09:00:00"));
+    }
+
+    #[test]
+    fn set_occurrence_danger_rejects_single_task() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        let created = TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "单次任务".to_string(),
+                note: None,
+                tag_id: None,
+                priority: None,
+                all_day: true,
+                start_date: Some("2026-04-13".to_string()),
+                start_time: None,
+                due_date: "2026-04-13".to_string(),
+                due_time: None,
+                recurrence_type: None,
+                recurrence_interval: None,
+                recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
+            },
+        )
+        .expect("should create single task");
+
+        let result = TaskService::set_occurrence_danger(
+            &database,
+            TaskSetOccurrenceDangerInput {
+                series_id: created.series_id,
+                occurrence_key: "2026-04-13".to_string(),
+                danger_at: Some("2026-04-12T00:00:00".to_string()),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn set_occurrence_danger_rejects_invalid_anchor_format() {
+        let temp_dir = tempdir().expect("should create temp dir");
+        let db_path = temp_dir.path().join("todo.data.sqlite3");
+        let database = Database::open_at(&db_path).expect("should open database");
+
+        let created = TaskService::create_task(
+            &database,
+            TaskCreateInput {
+                title: "每日校验".to_string(),
+                note: None,
+                tag_id: None,
+                priority: None,
+                all_day: true,
+                start_date: Some("2026-04-13".to_string()),
+                start_time: None,
+                due_date: "2026-04-13".to_string(),
+                due_time: None,
+                recurrence_type: Some("day".to_string()),
+                recurrence_interval: Some(1),
+                recurrence_until: None,
+                danger_offset_value: None,
+                danger_offset_unit: None,
+                danger_use_workday: false,
+            },
+        )
+        .expect("should create recurring task");
+
+        let result = TaskService::set_occurrence_danger(
+            &database,
+            TaskSetOccurrenceDangerInput {
+                series_id: created.series_id,
+                occurrence_key: "rev|2026-04-13T00:00:00|2026-04-13T00:00:00".to_string(),
+                danger_at: Some("not-a-timestamp".to_string()),
+            },
+        );
+        assert!(result.is_err());
     }
 }

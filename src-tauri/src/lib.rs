@@ -12,8 +12,8 @@ use service::sync_service::{SyncMetaItemDto, SyncMetaSetInput, SyncService, Sync
 use service::tag_service::{TagCreateInput, TagDto, TagService, TagUpdateInput};
 use service::task_service::{
     CalendarDayDto, TaskCreateInput, TaskDetailDto, TaskEditorDto, TaskListItemDto, TaskService,
-    TaskSetOccurrenceStatusInput, TaskSetStatusInput, TaskUpdateInput, TaskUpdateTemplateFromInput,
-    UpcomingQueryInput,
+    TaskSetOccurrenceDangerInput, TaskSetOccurrenceStatusInput, TaskSetStatusInput, TaskUpdateInput,
+    TaskUpdateTemplateFromInput, UpcomingQueryInput,
 };
 use tauri::{Manager, State};
 
@@ -179,6 +179,14 @@ fn task_set_occurrence_status(
 }
 
 #[tauri::command]
+fn task_set_occurrence_danger(
+    state: State<'_, AppState>,
+    input: TaskSetOccurrenceDangerInput,
+) -> CommandResult<TaskDetailDto> {
+    TaskService::set_occurrence_danger(&state.database, input).map_err(CommandError::from)
+}
+
+#[tauri::command]
 fn task_update_template_from(
     state: State<'_, AppState>,
     input: TaskUpdateTemplateFromInput,
@@ -240,6 +248,7 @@ pub fn run() {
             task_delete,
             task_set_status,
             task_set_occurrence_status,
+            task_set_occurrence_danger,
             task_update_template_from,
             upcoming_query,
             task_calendar_query
